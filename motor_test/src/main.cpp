@@ -8,24 +8,25 @@
 #endif
 
 namespace Pins {
-constexpr uint8_t STBY = 13;
+// ESP32-S3 pin assignment. GPIO22-25 do not exist on ESP32-S3, and
+// GPIO26-32 are commonly reserved for flash/PSRAM on modules with PSRAM.
+constexpr uint8_t ARC_LEFT_IN1 = 4;
+constexpr uint8_t ARC_LEFT_IN2 = 5;
+constexpr uint8_t ARC_LEFT_PWM = 6;
+constexpr uint8_t ARC_RIGHT_IN1 = 7;
+constexpr uint8_t ARC_RIGHT_IN2 = 8;
+constexpr uint8_t ARC_RIGHT_PWM = 9;
 
-constexpr uint8_t ARC_LEFT_IN1 = 16;
-constexpr uint8_t ARC_LEFT_IN2 = 17;
-constexpr uint8_t ARC_LEFT_PWM = 25;
-constexpr uint8_t ARC_RIGHT_IN1 = 18;
-constexpr uint8_t ARC_RIGHT_IN2 = 19;
-constexpr uint8_t ARC_RIGHT_PWM = 26;
+constexpr uint8_t ROLLER_LEFT_IN1 = 10;
+constexpr uint8_t ROLLER_LEFT_IN2 = 11;
+constexpr uint8_t ROLLER_LEFT_PWM = 12;
+constexpr uint8_t ROLLER_RIGHT_IN1 = 14;
+constexpr uint8_t ROLLER_RIGHT_IN2 = 15;
+constexpr uint8_t ROLLER_RIGHT_PWM = 16;
 
-constexpr uint8_t ROLLER_LEFT_IN1 = 21;
-constexpr uint8_t ROLLER_LEFT_IN2 = 22;
-constexpr uint8_t ROLLER_LEFT_PWM = 27;
-constexpr uint8_t ROLLER_RIGHT_IN1 = 23;
-constexpr uint8_t ROLLER_RIGHT_IN2 = 5;
-constexpr uint8_t ROLLER_RIGHT_PWM = 14;
-
-constexpr uint8_t START_STOP_BUTTON = 32;  // button between GPIO32 and GND
-constexpr uint8_t STATUS_LED = 2;
+constexpr uint8_t STBY = 17;
+constexpr uint8_t START_STOP_BUTTON = 18;  // button between GPIO18 and GND
+constexpr uint8_t STATUS_LED = 47;         // optional external LED
 }  // namespace Pins
 
 namespace TestConfig {

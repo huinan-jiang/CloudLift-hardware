@@ -2,33 +2,33 @@
 
 #include <Arduino.h>
 
-// ESP32 DevKit V1 -> two TB6612FNG boards. Both boards share STBY.
+// ESP32-S3 -> two TB6612FNG boards. Both boards share STBY.
 namespace Pins {
-constexpr uint8_t STBY = 13;
+constexpr uint8_t ARC_LEFT_IN1 = 4;
+constexpr uint8_t ARC_LEFT_IN2 = 5;
+constexpr uint8_t ARC_LEFT_PWM = 6;
+constexpr uint8_t ARC_RIGHT_IN1 = 7;
+constexpr uint8_t ARC_RIGHT_IN2 = 8;
+constexpr uint8_t ARC_RIGHT_PWM = 9;
 
-constexpr uint8_t ARC_LEFT_IN1 = 16;
-constexpr uint8_t ARC_LEFT_IN2 = 17;
-constexpr uint8_t ARC_LEFT_PWM = 25;
-constexpr uint8_t ARC_RIGHT_IN1 = 18;
-constexpr uint8_t ARC_RIGHT_IN2 = 19;
-constexpr uint8_t ARC_RIGHT_PWM = 26;
+constexpr uint8_t ROLLER_LEFT_IN1 = 10;
+constexpr uint8_t ROLLER_LEFT_IN2 = 11;
+constexpr uint8_t ROLLER_LEFT_PWM = 12;
+constexpr uint8_t ROLLER_RIGHT_IN1 = 14;
+constexpr uint8_t ROLLER_RIGHT_IN2 = 15;
+constexpr uint8_t ROLLER_RIGHT_PWM = 16;
 
-constexpr uint8_t ROLLER_LEFT_IN1 = 21;
-constexpr uint8_t ROLLER_LEFT_IN2 = 22;
-constexpr uint8_t ROLLER_LEFT_PWM = 27;
-constexpr uint8_t ROLLER_RIGHT_IN1 = 23;
-constexpr uint8_t ROLLER_RIGHT_IN2 = 5;
-constexpr uint8_t ROLLER_RIGHT_PWM = 14;
+constexpr uint8_t STBY = 17;
 
 // Normally-closed switches to GND. LOW=healthy, HIGH=limit hit/wire broken.
-constexpr uint8_t LIMIT_LEFT = 34;
-constexpr uint8_t LIMIT_RIGHT = 35;
+constexpr uint8_t LIMIT_LEFT = 18;
+constexpr uint8_t LIMIT_RIGHT = 21;
 
 // ADC1 pins remain usable if Wi-Fi is enabled later.
-constexpr uint8_t PRESSURE_LEFT = 36;
-constexpr uint8_t PRESSURE_RIGHT = 39;
-constexpr uint8_t START_STOP = 32;  // push button to GND
-constexpr uint8_t STATUS_LED = 2;
+constexpr uint8_t PRESSURE_LEFT = 1;
+constexpr uint8_t PRESSURE_RIGHT = 2;
+constexpr uint8_t START_STOP = 38;  // push button to GND
+constexpr uint8_t STATUS_LED = 47;  // optional external LED
 }  // namespace Pins
 
 namespace Control {
