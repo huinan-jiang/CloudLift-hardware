@@ -41,6 +41,8 @@ constexpr int PRESSURE_RELEASE_RAW = 250;
 constexpr uint32_t CLAMP_TIMEOUT_MS = 5000;
 constexpr uint32_t DEBOUNCE_MS = 40;
 constexpr uint32_t CONTROL_PERIOD_MS = 10;
+constexpr uint32_t TELEMETRY_PERIOD_MS = 500;
+constexpr uint32_t DEFAULT_SESSION_MS = 10UL * 60UL * 1000UL;
 
 // Change signs after the first no-load direction test if mechanics run opposite.
 constexpr int8_t ARC_LEFT_CLOSE_SIGN = +1;
@@ -49,3 +51,10 @@ constexpr int8_t ROLLER_LEFT_SIGN = +1;
 constexpr int8_t ROLLER_RIGHT_SIGN = -1;
 }  // namespace Control
 
+namespace BleConfig {
+constexpr char DEVICE_NAME[] = "CloudLift";
+constexpr char SERVICE_UUID[] = "7e400001-b5a3-f393-e0a9-e50e24dcca9e";
+constexpr char COMMAND_UUID[] = "7e400002-b5a3-f393-e0a9-e50e24dcca9e";
+constexpr char TELEMETRY_UUID[] = "7e400003-b5a3-f393-e0a9-e50e24dcca9e";
+constexpr size_t MAX_COMMAND_BYTES = 192;
+}  // namespace BleConfig

@@ -1,4 +1,8 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
+#include <BLE2902.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
 #include "config.h"
 
 class Motor {
@@ -36,11 +40,23 @@ Motor arcRight(Pins::ARC_RIGHT_IN1, Pins::ARC_RIGHT_IN2, Pins::ARC_RIGHT_PWM, 1)
 Motor rollerLeft(Pins::ROLLER_LEFT_IN1, Pins::ROLLER_LEFT_IN2, Pins::ROLLER_LEFT_PWM, 2);
 Motor rollerRight(Pins::ROLLER_RIGHT_IN1, Pins::ROLLER_RIGHT_IN2, Pins::ROLLER_RIGHT_PWM, 3);
 
-enum class State { IDLE, CLAMPING, MASSAGING, RELEASING, FAULT };
+enum class State { IDLE, CLAMPING, MASSAGING, PAUSED, RELEASING, FAULT };
 State state = State::IDLE;
 int8_t travelDirection = +1;
 uint32_t stateStartedAt = 0;
 uint32_t lastControlAt = 0;
+uint32_t sessionDurationMs = Control::DEFAULT_SESSION_MS;
+uint32_t sessionStartedAt = 0;
+uint32_t pausedAt = 0;
+uint8_t forceLevel = 3;
+uint8_t speedLevel = 3;
+uint8_t mode = 0;
+const char* faultCode = "none";
+
+BLECharacteristic* telemetryCharacteristic = nullptr;
+QueueHandle_t commandQueue = nullptr;
+volatile bool bleConnected = false;
+volatile bool disconnectPending = false;
 
 int pressureLeft = 0;
 int pressureRight = 0;
@@ -48,6 +64,29 @@ int pressureRight = 0;
 bool leftLimit() { return digitalRead(Pins::LIMIT_LEFT) == HIGH; }
 bool rightLimit() { return digitalRead(Pins::LIMIT_RIGHT) == HIGH; }
 int maxPressure() { return max(pressureLeft, pressureRight); }
+
+const char* stateName() {
+  switch (state) {
+    case State::IDLE: return "idle";
+    case State::CLAMPING: return "clamping";
+    case State::MASSAGING: return "massaging";
+    case State::PAUSED: return "paused";
+    case State::RELEASING: return "releasing";
+    case State::FAULT: return "fault";
+  }
+  return "fault";
+}
+
+int scaledSpeed(int base) {
+  static constexpr uint8_t scale[] = {55, 70, 85, 100, 115};
+  return constrain(base * scale[constrain(speedLevel, 1, 5) - 1] / 100, 0, 255);
+}
+
+int targetPressure() {
+  // Temporary raw-ADC mapping. Replace after sensor calibration.
+  static constexpr int targets[] = {900, 1200, 1500, 1750, 1950};
+  return targets[constrain(forceLevel, 1, 5) - 1];
+}
 
 void stopAll() {
   arcLeft.stop();
@@ -61,6 +100,11 @@ void enterState(State next) {
   state = next;
   stateStartedAt = millis();
   digitalWrite(Pins::STATUS_LED, next == State::FAULT ? HIGH : LOW);
+}
+
+void setFault(const char* code) {
+  faultCode = code;
+  enterState(State::FAULT);
 }
 
 void samplePressure() {
@@ -89,7 +133,8 @@ void controlStep() {
   samplePressure();
 
   if (maxPressure() >= Control::PRESSURE_MAX_RAW && state != State::IDLE &&
-      state != State::RELEASING) {
+      state != State::RELEASING && state != State::FAULT) {
+    faultCode = "over_pressure";
     enterState(State::RELEASING);
   }
 
@@ -99,24 +144,32 @@ void controlStep() {
 
     case State::CLAMPING:
       if (leftLimit() || rightLimit()) {
-        enterState(State::FAULT);
-      } else if (maxPressure() >= Control::PRESSURE_TARGET_RAW) {
+        setFault("limit_during_clamp");
+      } else if (maxPressure() >= targetPressure()) {
         enterState(State::MASSAGING);
       } else if (millis() - stateStartedAt > Control::CLAMP_TIMEOUT_MS) {
-        enterState(State::FAULT);
+        setFault("clamp_timeout");
       } else {
-        arcLeft.drive(Control::ARC_LEFT_CLOSE_SIGN * Control::ARC_CLOSE_SPEED);
-        arcRight.drive(Control::ARC_RIGHT_CLOSE_SIGN * Control::ARC_CLOSE_SPEED);
+        arcLeft.drive(Control::ARC_LEFT_CLOSE_SIGN * scaledSpeed(Control::ARC_CLOSE_SPEED));
+        arcRight.drive(Control::ARC_RIGHT_CLOSE_SIGN * scaledSpeed(Control::ARC_CLOSE_SPEED));
       }
       break;
 
     case State::MASSAGING:
       if (leftLimit()) travelDirection = +1;
       if (rightLimit()) travelDirection = -1;
-      arcLeft.drive(travelDirection * Control::ARC_TRAVERSE_SPEED);
-      arcRight.drive(travelDirection * Control::ARC_TRAVERSE_SPEED);
-      rollerLeft.drive(Control::ROLLER_LEFT_SIGN * Control::ROLLER_SPEED);
-      rollerRight.drive(Control::ROLLER_RIGHT_SIGN * Control::ROLLER_SPEED);
+      if (millis() - sessionStartedAt >= sessionDurationMs) {
+        enterState(State::RELEASING);
+        break;
+      }
+      arcLeft.drive(travelDirection * scaledSpeed(Control::ARC_TRAVERSE_SPEED));
+      arcRight.drive(travelDirection * scaledSpeed(Control::ARC_TRAVERSE_SPEED));
+      rollerLeft.drive(Control::ROLLER_LEFT_SIGN * scaledSpeed(Control::ROLLER_SPEED));
+      rollerRight.drive(Control::ROLLER_RIGHT_SIGN * scaledSpeed(Control::ROLLER_SPEED));
+      break;
+
+    case State::PAUSED:
+      stopAll();
       break;
 
     case State::RELEASING:
@@ -131,6 +184,102 @@ void controlStep() {
       stopAll();
       break;
   }
+}
+
+struct BleCommand { char json[BleConfig::MAX_COMMAND_BYTES]; };
+
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer*) override { bleConnected = true; }
+  void onDisconnect(BLEServer*) override {
+    bleConnected = false;
+    disconnectPending = true;
+    BLEDevice::startAdvertising();
+  }
+};
+
+class CommandCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* characteristic) override {
+    const std::string value = characteristic->getValue();
+    if (value.empty() || value.size() >= BleConfig::MAX_COMMAND_BYTES) return;
+    BleCommand command{};
+    memcpy(command.json, value.data(), value.size());
+    command.json[value.size()] = '\0';
+    xQueueSend(commandQueue, &command, 0);
+  }
+};
+
+void processCommand(const char* json) {
+  StaticJsonDocument<192> doc;
+  if (deserializeJson(doc, json)) return;
+  const char* command = doc["cmd"] | "";
+
+  if (!strcmp(command, "START")) {
+    if (state == State::IDLE) {
+      faultCode = "none";
+      sessionStartedAt = millis();
+      enterState(State::CLAMPING);
+    } else if (state == State::PAUSED) {
+      sessionStartedAt += millis() - pausedAt;
+      enterState(State::MASSAGING);
+    }
+  } else if (!strcmp(command, "PAUSE") && state == State::MASSAGING) {
+    pausedAt = millis();
+    enterState(State::PAUSED);
+  } else if (!strcmp(command, "STOP")) {
+    if (state != State::IDLE) enterState(State::RELEASING);
+  } else if (!strcmp(command, "SET_FORCE") && state == State::IDLE) {
+    forceLevel = constrain(doc["value"] | 3, 1, 5);
+  } else if (!strcmp(command, "SET_SPEED")) {
+    speedLevel = constrain(doc["value"] | 3, 1, 5);
+  } else if (!strcmp(command, "SET_TIME") && state == State::IDLE) {
+    const uint32_t seconds = constrain(doc["seconds"] | 600, 10, 3600);
+    sessionDurationMs = seconds * 1000UL;
+  } else if (!strcmp(command, "SET_MODE") && state == State::IDLE) {
+    mode = constrain(doc["value"] | 0, 0, 3);
+  } else if (!strcmp(command, "CLEAR_FAULT") && state == State::FAULT) {
+    faultCode = "none";
+    enterState(State::IDLE);
+  }
+}
+
+void publishTelemetry() {
+  if (!bleConnected || telemetryCharacteristic == nullptr) return;
+  StaticJsonDocument<256> doc;
+  doc["state"] = stateName();
+  doc["pressure_left"] = pressureLeft;
+  doc["pressure_right"] = pressureRight;
+  doc["limit_left"] = leftLimit();
+  doc["limit_right"] = rightLimit();
+  doc["force"] = forceLevel;
+  doc["speed"] = speedLevel;
+  doc["mode"] = mode;
+  doc["fault"] = faultCode;
+  uint32_t elapsed = 0;
+  if (state == State::MASSAGING) elapsed = millis() - sessionStartedAt;
+  else if (state == State::PAUSED) elapsed = pausedAt - sessionStartedAt;
+  doc["remaining_s"] = elapsed >= sessionDurationMs ? 0 : (sessionDurationMs - elapsed) / 1000;
+  char buffer[256];
+  const size_t length = serializeJson(doc, buffer, sizeof(buffer));
+  telemetryCharacteristic->setValue(reinterpret_cast<uint8_t*>(buffer), length);
+  telemetryCharacteristic->notify();
+}
+
+void setupBle() {
+  commandQueue = xQueueCreate(6, sizeof(BleCommand));
+  BLEDevice::init(BleConfig::DEVICE_NAME);
+  BLEServer* server = BLEDevice::createServer();
+  server->setCallbacks(new ServerCallbacks());
+  BLEService* service = server->createService(BleConfig::SERVICE_UUID);
+  BLECharacteristic* commandCharacteristic = service->createCharacteristic(
+      BleConfig::COMMAND_UUID, BLECharacteristic::PROPERTY_WRITE);
+  commandCharacteristic->setCallbacks(new CommandCallbacks());
+  telemetryCharacteristic = service->createCharacteristic(
+      BleConfig::TELEMETRY_UUID,
+      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  telemetryCharacteristic->addDescriptor(new BLE2902());
+  service->start();
+  server->getAdvertising()->addServiceUUID(BleConfig::SERVICE_UUID);
+  server->getAdvertising()->start();
 }
 
 void setup() {
@@ -149,10 +298,21 @@ void setup() {
   rollerRight.begin();
   digitalWrite(Pins::STBY, HIGH);
   enterState(State::IDLE);
+  setupBle();
   Serial.println("Cloud-Parting Hand controller ready");
 }
 
 void loop() {
+  if (disconnectPending) {
+    disconnectPending = false;
+    if (state != State::IDLE && state != State::FAULT) enterState(State::RELEASING);
+  }
+
+  BleCommand bleCommand{};
+  while (commandQueue != nullptr && xQueueReceive(commandQueue, &bleCommand, 0) == pdTRUE) {
+    processCommand(bleCommand.json);
+  }
+
   if (buttonPressedEvent()) {
     if (state == State::IDLE) enterState(State::CLAMPING);
     else if (state == State::FAULT) enterState(State::IDLE);
@@ -164,6 +324,12 @@ void loop() {
     controlStep();
   }
 
+  static uint32_t lastTelemetryAt = 0;
+  if (millis() - lastTelemetryAt >= Control::TELEMETRY_PERIOD_MS) {
+    lastTelemetryAt = millis();
+    publishTelemetry();
+  }
+
   static uint32_t lastReportAt = 0;
   if (millis() - lastReportAt >= 500) {
     lastReportAt = millis();
@@ -172,4 +338,3 @@ void loop() {
                   leftLimit(), rightLimit());
   }
 }
-
