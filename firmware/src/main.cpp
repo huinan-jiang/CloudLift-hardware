@@ -52,6 +52,7 @@ uint8_t forceLevel = 3;
 uint8_t speedLevel = 3;
 uint8_t mode = 0;
 const char* faultCode = "none";
+bool faultAfterRelease = false;
 
 BLECharacteristic* telemetryCharacteristic = nullptr;
 QueueHandle_t commandQueue = nullptr;
@@ -102,9 +103,10 @@ void enterState(State next) {
   digitalWrite(Pins::STATUS_LED, next == State::FAULT ? HIGH : LOW);
 }
 
-void setFault(const char* code) {
+void requestFaultRelease(const char* code) {
   faultCode = code;
-  enterState(State::FAULT);
+  faultAfterRelease = true;
+  enterState(State::RELEASING);
 }
 
 void samplePressure() {
@@ -134,8 +136,7 @@ void controlStep() {
 
   if (maxPressure() >= Control::PRESSURE_MAX_RAW && state != State::IDLE &&
       state != State::RELEASING && state != State::FAULT) {
-    faultCode = "over_pressure";
-    enterState(State::RELEASING);
+    requestFaultRelease("over_pressure");
   }
 
   switch (state) {
@@ -144,11 +145,12 @@ void controlStep() {
 
     case State::CLAMPING:
       if (leftLimit() || rightLimit()) {
-        setFault("limit_during_clamp");
+        requestFaultRelease("limit_during_clamp");
       } else if (maxPressure() >= targetPressure()) {
+        sessionStartedAt = millis();
         enterState(State::MASSAGING);
       } else if (millis() - stateStartedAt > Control::CLAMP_TIMEOUT_MS) {
-        setFault("clamp_timeout");
+        requestFaultRelease("clamp_timeout");
       } else {
         arcLeft.drive(Control::ARC_LEFT_CLOSE_SIGN * scaledSpeed(Control::ARC_CLOSE_SPEED));
         arcRight.drive(Control::ARC_RIGHT_CLOSE_SIGN * scaledSpeed(Control::ARC_CLOSE_SPEED));
@@ -186,7 +188,12 @@ void controlStep() {
       arcLeft.drive(-Control::ARC_LEFT_CLOSE_SIGN * Control::ARC_CLOSE_SPEED);
       arcRight.drive(-Control::ARC_RIGHT_CLOSE_SIGN * Control::ARC_CLOSE_SPEED);
       if (maxPressure() <= Control::PRESSURE_RELEASE_RAW || leftLimit() || rightLimit()) {
-        enterState(State::IDLE);
+        if (faultAfterRelease) {
+          faultAfterRelease = false;
+          enterState(State::FAULT);
+        } else {
+          enterState(State::IDLE);
+        }
       }
       break;
 
@@ -226,6 +233,7 @@ void processCommand(const char* json) {
   if (!strcmp(command, "START")) {
     if (state == State::IDLE) {
       faultCode = "none";
+      faultAfterRelease = false;
       sessionStartedAt = millis();
       enterState(State::CLAMPING);
     } else if (state == State::PAUSED) {
@@ -248,6 +256,7 @@ void processCommand(const char* json) {
     mode = constrain(doc["value"] | 0, 0, 3);
   } else if (!strcmp(command, "CLEAR_FAULT") && state == State::FAULT) {
     faultCode = "none";
+    faultAfterRelease = false;
     enterState(State::IDLE);
   }
 }
@@ -324,8 +333,17 @@ void loop() {
   }
 
   if (buttonPressedEvent()) {
-    if (state == State::IDLE) enterState(State::CLAMPING);
-    else if (state == State::FAULT) enterState(State::IDLE);
+    if (state == State::IDLE) {
+      faultCode = "none";
+      faultAfterRelease = false;
+      sessionStartedAt = millis();
+      enterState(State::CLAMPING);
+    }
+    else if (state == State::FAULT) {
+      faultCode = "none";
+      faultAfterRelease = false;
+      enterState(State::IDLE);
+    }
     else enterState(State::RELEASING);
   }
 

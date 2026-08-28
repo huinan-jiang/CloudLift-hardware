@@ -1,0 +1,4 @@
+.pio-core/
+.tools/
+firmware/.pio/
+github_upload/
