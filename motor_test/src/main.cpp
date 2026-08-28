@@ -1,4 +1,11 @@
 #include <Arduino.h>
+#if __has_include(<esp_arduino_version.h>)
+#include <esp_arduino_version.h>
+#endif
+
+#ifndef ESP_ARDUINO_VERSION_MAJOR
+#define ESP_ARDUINO_VERSION_MAJOR 2
+#endif
 
 namespace Pins {
 constexpr uint8_t STBY = 13;
@@ -43,8 +50,12 @@ class Motor {
   void begin() {
     pinMode(in1_, OUTPUT);
     pinMode(in2_, OUTPUT);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcAttach(pwm_, 20000, 8);
+#else
     ledcSetup(channel_, 20000, 8);
     ledcAttachPin(pwm_, channel_);
+#endif
     stop();
   }
 
@@ -52,13 +63,21 @@ class Motor {
     speed = constrain(speed, -255, 255);
     digitalWrite(in1_, speed > 0 ? HIGH : LOW);
     digitalWrite(in2_, speed < 0 ? HIGH : LOW);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(pwm_, abs(speed));
+#else
     ledcWrite(channel_, abs(speed));
+#endif
   }
 
   void stop() {
     digitalWrite(in1_, LOW);
     digitalWrite(in2_, LOW);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(pwm_, 0);
+#else
     ledcWrite(channel_, 0);
+#endif
   }
 
  private:
@@ -158,4 +177,3 @@ void loop() {
   if (running) runCombinedMode();
   delay(2);
 }
-
