@@ -156,16 +156,26 @@ void controlStep() {
       break;
 
     case State::MASSAGING:
-      if (leftLimit()) travelDirection = +1;
-      if (rightLimit()) travelDirection = -1;
       if (millis() - sessionStartedAt >= sessionDurationMs) {
         enterState(State::RELEASING);
         break;
       }
-      arcLeft.drive(travelDirection * scaledSpeed(Control::ARC_TRAVERSE_SPEED));
-      arcRight.drive(travelDirection * scaledSpeed(Control::ARC_TRAVERSE_SPEED));
-      rollerLeft.drive(Control::ROLLER_LEFT_SIGN * scaledSpeed(Control::ROLLER_SPEED));
-      rollerRight.drive(Control::ROLLER_RIGHT_SIGN * scaledSpeed(Control::ROLLER_SPEED));
+      if (mode == 0 || mode == 3) {
+        if (leftLimit()) travelDirection = +1;
+        if (rightLimit()) travelDirection = -1;
+        arcLeft.drive(travelDirection * scaledSpeed(Control::ARC_TRAVERSE_SPEED));
+        arcRight.drive(travelDirection * scaledSpeed(Control::ARC_TRAVERSE_SPEED));
+      } else {
+        arcLeft.stop();
+        arcRight.stop();
+      }
+      if (mode == 0 || mode == 2) {
+        rollerLeft.drive(Control::ROLLER_LEFT_SIGN * scaledSpeed(Control::ROLLER_SPEED));
+        rollerRight.drive(Control::ROLLER_RIGHT_SIGN * scaledSpeed(Control::ROLLER_SPEED));
+      } else {
+        rollerLeft.stop();
+        rollerRight.stop();
+      }
       break;
 
     case State::PAUSED:
