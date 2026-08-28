@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <ArduinoJson.h>
 #include <BLE2902.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -226,9 +225,34 @@ class CommandCallbacks : public BLECharacteristicCallbacks {
 };
 
 void processCommand(const char* json) {
-  StaticJsonDocument<192> doc;
-  if (deserializeJson(doc, json)) return;
-  const char* command = doc["cmd"] | "";
+  auto readString = [](const char* source, const char* key, char* output,
+                       size_t outputSize) -> bool {
+    char pattern[24];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char* position = strstr(source, pattern);
+    if (!position) return false;
+    position = strchr(position + strlen(pattern), ':');
+    if (!position) return false;
+    position = strchr(position, '"');
+    if (!position) return false;
+    const char* end = strchr(++position, '"');
+    if (!end || static_cast<size_t>(end - position) >= outputSize) return false;
+    memcpy(output, position, end - position);
+    output[end - position] = '\0';
+    return true;
+  };
+  auto readInt = [](const char* source, const char* key, int fallback) -> int {
+    char pattern[24];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char* position = strstr(source, pattern);
+    if (!position) return fallback;
+    position = strchr(position + strlen(pattern), ':');
+    if (!position) return fallback;
+    return atoi(position + 1);
+  };
+
+  char command[24]{};
+  if (!readString(json, "cmd", command, sizeof(command))) return;
 
   if (!strcmp(command, "START")) {
     if (state == State::IDLE) {
@@ -246,14 +270,14 @@ void processCommand(const char* json) {
   } else if (!strcmp(command, "STOP")) {
     if (state != State::IDLE) enterState(State::RELEASING);
   } else if (!strcmp(command, "SET_FORCE") && state == State::IDLE) {
-    forceLevel = constrain(doc["value"] | 3, 1, 5);
+    forceLevel = constrain(readInt(json, "value", 3), 1, 5);
   } else if (!strcmp(command, "SET_SPEED")) {
-    speedLevel = constrain(doc["value"] | 3, 1, 5);
+    speedLevel = constrain(readInt(json, "value", 3), 1, 5);
   } else if (!strcmp(command, "SET_TIME") && state == State::IDLE) {
-    const uint32_t seconds = constrain(doc["seconds"] | 600, 10, 3600);
+    const uint32_t seconds = constrain(readInt(json, "seconds", 600), 10, 3600);
     sessionDurationMs = seconds * 1000UL;
   } else if (!strcmp(command, "SET_MODE") && state == State::IDLE) {
-    mode = constrain(doc["value"] | 0, 0, 3);
+    mode = constrain(readInt(json, "value", 0), 0, 3);
   } else if (!strcmp(command, "CLEAR_FAULT") && state == State::FAULT) {
     faultCode = "none";
     faultAfterRelease = false;
@@ -263,22 +287,22 @@ void processCommand(const char* json) {
 
 void publishTelemetry() {
   if (!bleConnected || telemetryCharacteristic == nullptr) return;
-  StaticJsonDocument<256> doc;
-  doc["state"] = stateName();
-  doc["pressure_left"] = pressureLeft;
-  doc["pressure_right"] = pressureRight;
-  doc["limit_left"] = leftLimit();
-  doc["limit_right"] = rightLimit();
-  doc["force"] = forceLevel;
-  doc["speed"] = speedLevel;
-  doc["mode"] = mode;
-  doc["fault"] = faultCode;
   uint32_t elapsed = 0;
   if (state == State::MASSAGING) elapsed = millis() - sessionStartedAt;
   else if (state == State::PAUSED) elapsed = pausedAt - sessionStartedAt;
-  doc["remaining_s"] = elapsed >= sessionDurationMs ? 0 : (sessionDurationMs - elapsed) / 1000;
-  char buffer[256];
-  const size_t length = serializeJson(doc, buffer, sizeof(buffer));
+  const uint32_t remaining =
+      elapsed >= sessionDurationMs ? 0 : (sessionDurationMs - elapsed) / 1000;
+  char buffer[244];
+  const int written = snprintf(
+      buffer, sizeof(buffer),
+      "{\"state\":\"%s\",\"pressure_left\":%d,\"pressure_right\":%d,"
+      "\"limit_left\":%s,\"limit_right\":%s,\"force\":%u,\"speed\":%u,"
+      "\"mode\":%u,\"fault\":\"%s\",\"remaining_s\":%lu}",
+      stateName(), pressureLeft, pressureRight, leftLimit() ? "true" : "false",
+      rightLimit() ? "true" : "false", forceLevel, speedLevel, mode, faultCode,
+      static_cast<unsigned long>(remaining));
+  if (written <= 0 || written >= static_cast<int>(sizeof(buffer))) return;
+  const size_t length = static_cast<size_t>(written);
   telemetryCharacteristic->setValue(reinterpret_cast<uint8_t*>(buffer), length);
   telemetryCharacteristic->notify();
 }
@@ -286,6 +310,7 @@ void publishTelemetry() {
 void setupBle() {
   commandQueue = xQueueCreate(6, sizeof(BleCommand));
   BLEDevice::init(BleConfig::DEVICE_NAME);
+  BLEDevice::setMTU(247);
   BLEServer* server = BLEDevice::createServer();
   server->setCallbacks(new ServerCallbacks());
   BLEService* service = server->createService(BleConfig::SERVICE_UUID);
