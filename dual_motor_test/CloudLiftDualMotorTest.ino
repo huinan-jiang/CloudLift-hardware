@@ -7,22 +7,44 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// Motor 1 driver inputs
-constexpr uint8_t MOTOR1_IN1 = 4;   // AIN1
-constexpr uint8_t MOTOR1_IN2 = 5;   // AIN2
-constexpr uint8_t MOTOR1_PWM = 6;   // PWMA
+// CloudLift dual-motor asynchronous bench test v0.2.0
+// Motor 1 = displacement motor; Motor 2 = massage motor.
 
-// Motor 2 driver inputs, according to the provided wiring order:
-// PWMC -> GPIO40, CIN2 -> GPIO41, CIN1 -> GPIO42.
-constexpr uint8_t MOTOR2_PWM = 40;  // PWMC
-constexpr uint8_t MOTOR2_IN2 = 41;  // CIN2
-constexpr uint8_t MOTOR2_IN1 = 42;  // CIN1
+constexpr uint8_t MOVE_IN1 = 4;   // AIN1
+constexpr uint8_t MOVE_IN2 = 5;   // AIN2
+constexpr uint8_t MOVE_PWM = 6;   // PWMA
 
-constexpr uint8_t MOTOR1_CHANNEL = 0;  // Arduino-ESP32 2.x only
-constexpr uint8_t MOTOR2_CHANNEL = 1;  // Arduino-ESP32 2.x only
+constexpr uint8_t MASSAGE_PWM = 40;  // PWMC
+constexpr uint8_t MASSAGE_IN2 = 41;  // CIN2
+constexpr uint8_t MASSAGE_IN1 = 42;  // CIN1
+
+constexpr uint8_t MOVE_PWM_CHANNEL = 0;     // Arduino-ESP32 2.x only
+constexpr uint8_t MASSAGE_PWM_CHANNEL = 1;  // Arduino-ESP32 2.x only
 constexpr uint32_t PWM_FREQUENCY = 20000;
 constexpr uint8_t PWM_RESOLUTION = 8;
-constexpr int TEST_PWM = 160;  // 0..255
+
+constexpr int MOVE_TARGET_PWM = 150;
+constexpr int MASSAGE_TARGET_PWM = 160;
+constexpr int8_t MASSAGE_DIRECTION = +1;
+constexpr uint32_t POWER_ON_DELAY_MS = 3000;
+constexpr uint32_t SOFT_START_MS = 800;
+constexpr uint32_t MOVE_RUN_MS = 4000;
+constexpr uint32_t REVERSAL_PAUSE_MS = 400;
+constexpr uint32_t MAX_TEST_RUN_MS = 60000;
+
+enum class MovePhase {
+  FORWARD,
+  PAUSE_BEFORE_REVERSE,
+  REVERSE,
+  PAUSE_BEFORE_FORWARD
+};
+
+MovePhase movePhase = MovePhase::FORWARD;
+uint32_t bootAt = 0;
+uint32_t testStartedAt = 0;
+uint32_t movePhaseStartedAt = 0;
+bool testRunning = false;
+bool testFinished = false;
 
 void attachPwm(uint8_t pin, uint8_t channel) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -49,38 +71,106 @@ void driveMotor(uint8_t in1, uint8_t in2, uint8_t pwmPin,
   writePwm(pwmPin, pwmChannel, abs(speed));
 }
 
-void stopBoth() {
-  driveMotor(MOTOR1_IN1, MOTOR1_IN2, MOTOR1_PWM, MOTOR1_CHANNEL, 0);
-  driveMotor(MOTOR2_IN1, MOTOR2_IN2, MOTOR2_PWM, MOTOR2_CHANNEL, 0);
+int softStartPwm(uint32_t elapsed, int targetPwm) {
+  if (elapsed >= SOFT_START_MS) return targetPwm;
+  return map(elapsed, 0, SOFT_START_MS, 0, targetPwm);
+}
+
+void stopBothMotors() {
+  driveMotor(MOVE_IN1, MOVE_IN2, MOVE_PWM, MOVE_PWM_CHANNEL, 0);
+  driveMotor(MASSAGE_IN1, MASSAGE_IN2, MASSAGE_PWM,
+             MASSAGE_PWM_CHANNEL, 0);
+}
+
+void startTest() {
+  testRunning = true;
+  testStartedAt = millis();
+  movePhase = MovePhase::FORWARD;
+  movePhaseStartedAt = testStartedAt;
+  Serial.println("v0.2.0 asynchronous test started");
+}
+
+void updateMassageMotor(uint32_t now) {
+  const int pwm = softStartPwm(now - testStartedAt, MASSAGE_TARGET_PWM);
+  driveMotor(MASSAGE_IN1, MASSAGE_IN2, MASSAGE_PWM, MASSAGE_PWM_CHANNEL,
+             MASSAGE_DIRECTION * pwm);
+}
+
+void changeMovePhase(MovePhase next, uint32_t now) {
+  movePhase = next;
+  movePhaseStartedAt = now;
+}
+
+void updateDisplacementMotor(uint32_t now) {
+  const uint32_t elapsed = now - movePhaseStartedAt;
+
+  switch (movePhase) {
+    case MovePhase::FORWARD:
+      driveMotor(MOVE_IN1, MOVE_IN2, MOVE_PWM, MOVE_PWM_CHANNEL,
+                 softStartPwm(elapsed, MOVE_TARGET_PWM));
+      if (elapsed >= MOVE_RUN_MS) {
+        driveMotor(MOVE_IN1, MOVE_IN2, MOVE_PWM, MOVE_PWM_CHANNEL, 0);
+        changeMovePhase(MovePhase::PAUSE_BEFORE_REVERSE, now);
+      }
+      break;
+
+    case MovePhase::PAUSE_BEFORE_REVERSE:
+      driveMotor(MOVE_IN1, MOVE_IN2, MOVE_PWM, MOVE_PWM_CHANNEL, 0);
+      if (elapsed >= REVERSAL_PAUSE_MS) {
+        changeMovePhase(MovePhase::REVERSE, now);
+      }
+      break;
+
+    case MovePhase::REVERSE:
+      driveMotor(MOVE_IN1, MOVE_IN2, MOVE_PWM, MOVE_PWM_CHANNEL,
+                 -softStartPwm(elapsed, MOVE_TARGET_PWM));
+      if (elapsed >= MOVE_RUN_MS) {
+        driveMotor(MOVE_IN1, MOVE_IN2, MOVE_PWM, MOVE_PWM_CHANNEL, 0);
+        changeMovePhase(MovePhase::PAUSE_BEFORE_FORWARD, now);
+      }
+      break;
+
+    case MovePhase::PAUSE_BEFORE_FORWARD:
+      driveMotor(MOVE_IN1, MOVE_IN2, MOVE_PWM, MOVE_PWM_CHANNEL, 0);
+      if (elapsed >= REVERSAL_PAUSE_MS) {
+        changeMovePhase(MovePhase::FORWARD, now);
+      }
+      break;
+  }
 }
 
 void setup() {
-  pinMode(MOTOR1_IN1, OUTPUT);
-  pinMode(MOTOR1_IN2, OUTPUT);
-  pinMode(MOTOR2_IN1, OUTPUT);
-  pinMode(MOTOR2_IN2, OUTPUT);
-
-  attachPwm(MOTOR1_PWM, MOTOR1_CHANNEL);
-  attachPwm(MOTOR2_PWM, MOTOR2_CHANNEL);
-  stopBoth();
-
-  delay(3000);
+  Serial.begin(115200);
+  pinMode(MOVE_IN1, OUTPUT);
+  pinMode(MOVE_IN2, OUTPUT);
+  pinMode(MASSAGE_IN1, OUTPUT);
+  pinMode(MASSAGE_IN2, OUTPUT);
+  attachPwm(MOVE_PWM, MOVE_PWM_CHANNEL);
+  attachPwm(MASSAGE_PWM, MASSAGE_PWM_CHANNEL);
+  stopBothMotors();
+  bootAt = millis();
+  Serial.println("CloudLift v0.2.0 ready; automatic start in 3 seconds");
 }
 
 void loop() {
-  // Both motors forward for 5 seconds.
-  driveMotor(MOTOR1_IN1, MOTOR1_IN2, MOTOR1_PWM, MOTOR1_CHANNEL, TEST_PWM);
-  driveMotor(MOTOR2_IN1, MOTOR2_IN2, MOTOR2_PWM, MOTOR2_CHANNEL, TEST_PWM);
-  delay(5000);
+  const uint32_t now = millis();
 
-  stopBoth();
-  delay(2000);
+  if (!testRunning && !testFinished && now - bootAt >= POWER_ON_DELAY_MS) {
+    startTest();
+  }
 
-  // Both motors reverse for 5 seconds.
-  driveMotor(MOTOR1_IN1, MOTOR1_IN2, MOTOR1_PWM, MOTOR1_CHANNEL, -TEST_PWM);
-  driveMotor(MOTOR2_IN1, MOTOR2_IN2, MOTOR2_PWM, MOTOR2_CHANNEL, -TEST_PWM);
-  delay(5000);
+  if (testRunning) {
+    if (now - testStartedAt >= MAX_TEST_RUN_MS) {
+      stopBothMotors();
+      testRunning = false;
+      testFinished = true;
+      Serial.println("60-second test completed; power cycle to run again");
+    } else {
+      updateMassageMotor(now);
+      updateDisplacementMotor(now);
+    }
+  }
 
-  stopBoth();
-  delay(5000);
+  delay(2);  // only yields CPU time; motor timing uses millis()
 }
+
