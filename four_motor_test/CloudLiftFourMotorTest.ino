@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor asynchronous bench test v0.3.0
+// CloudLift four-motor asynchronous bench test v0.3.1
 
 // Displacement motor 1: A channel
 constexpr uint8_t MOVE1_IN1 = 4;   // AIN1
@@ -47,10 +47,14 @@ constexpr int8_t MASSAGE2_SIGN = -1;
 
 constexpr int MOVE_START_PWM = 255;
 constexpr int MOVE_HOLD_PWM = 200;
-constexpr int MASSAGE_TARGET_PWM = 160;
+constexpr int MASSAGE1_TARGET_PWM = 160;
+constexpr int MASSAGE2_START_PWM = 255;
+constexpr int MASSAGE2_HOLD_PWM = 210;
 constexpr uint32_t POWER_ON_DELAY_MS = 3000;
 constexpr uint32_t MASSAGE_START_DELAY_MS = 500;
 constexpr uint32_t MASSAGE_SOFT_START_MS = 800;
+constexpr uint32_t MASSAGE2_EXTRA_DELAY_MS = 300;
+constexpr uint32_t MASSAGE2_START_BOOST_MS = 250;
 constexpr uint32_t MOVE_START_BOOST_MS = 250;
 constexpr uint32_t MOVE_RUN_MS = 1000;
 constexpr uint32_t REVERSAL_PAUSE_MS = 600;
@@ -102,16 +106,16 @@ void driveDisplacementPair(int speed) {
              MOVE2_SIGN * speed);
 }
 
-void driveMassagePair(int speed) {
+void driveMassageMotors(int massage1Speed, int massage2Speed) {
   driveMotor(MASSAGE1_IN1, MASSAGE1_IN2, MASSAGE1_PWM, MASSAGE1_CHANNEL,
-             MASSAGE1_SIGN * speed);
+             MASSAGE1_SIGN * massage1Speed);
   driveMotor(MASSAGE2_IN1, MASSAGE2_IN2, MASSAGE2_PWM, MASSAGE2_CHANNEL,
-             MASSAGE2_SIGN * speed);
+             MASSAGE2_SIGN * massage2Speed);
 }
 
 void stopAllMotors() {
   driveDisplacementPair(0);
-  driveMassagePair(0);
+  driveMassageMotors(0, 0);
 }
 
 int displacementPwm(uint32_t elapsed) {
@@ -119,8 +123,8 @@ int displacementPwm(uint32_t elapsed) {
 }
 
 int massagePwm(uint32_t elapsed) {
-  if (elapsed >= MASSAGE_SOFT_START_MS) return MASSAGE_TARGET_PWM;
-  return map(elapsed, 0, MASSAGE_SOFT_START_MS, 0, MASSAGE_TARGET_PWM);
+  if (elapsed >= MASSAGE_SOFT_START_MS) return MASSAGE1_TARGET_PWM;
+  return map(elapsed, 0, MASSAGE_SOFT_START_MS, 0, MASSAGE1_TARGET_PWM);
 }
 
 void changeMovePhase(MovePhase next, uint32_t now) {
@@ -167,10 +171,20 @@ void updateDisplacementPair(uint32_t now) {
 void updateMassagePair(uint32_t now) {
   const uint32_t elapsed = now - testStartedAt;
   if (elapsed < MASSAGE_START_DELAY_MS) {
-    driveMassagePair(0);
+    driveMassageMotors(0, 0);
     return;
   }
-  driveMassagePair(massagePwm(elapsed - MASSAGE_START_DELAY_MS));
+
+  const uint32_t massageElapsed = elapsed - MASSAGE_START_DELAY_MS;
+  const int massage1Pwm = massagePwm(massageElapsed);
+  int massage2Pwm = 0;
+  if (massageElapsed >= MASSAGE2_EXTRA_DELAY_MS) {
+    const uint32_t massage2Elapsed = massageElapsed - MASSAGE2_EXTRA_DELAY_MS;
+    massage2Pwm = massage2Elapsed < MASSAGE2_START_BOOST_MS
+                      ? MASSAGE2_START_PWM
+                      : MASSAGE2_HOLD_PWM;
+  }
+  driveMassageMotors(massage1Pwm, massage2Pwm);
 }
 
 void startTest() {
@@ -178,7 +192,7 @@ void startTest() {
   testStartedAt = millis();
   movePhase = MovePhase::FORWARD;
   movePhaseStartedAt = testStartedAt;
-  Serial.println("CloudLift v0.3.0 four-motor test started");
+  Serial.println("CloudLift v0.3.1 four-motor test started");
 }
 
 void setup() {
@@ -196,7 +210,7 @@ void setup() {
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.3.0 ready; automatic start in 3 seconds");
+  Serial.println("CloudLift v0.3.1 ready; automatic start in 3 seconds");
 }
 
 void loop() {
@@ -220,4 +234,3 @@ void loop() {
 
   delay(2);
 }
-
