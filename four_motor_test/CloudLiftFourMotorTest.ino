@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor pressure-gated massage framework v0.5.7
+// CloudLift four-motor pressure-gated massage framework v0.5.8
 
 // Strain sensor module analog output. AO must stay within 0..3.3V.
 constexpr uint8_t STRAIN_AO_PIN = 14;
@@ -24,9 +24,9 @@ constexpr uint8_t MASSAGE1_IN2 = 41;  // CIN2
 constexpr uint8_t MASSAGE1_IN1 = 42;  // CIN1
 
 // Displacement motor 2: D channel
-constexpr uint8_t MOVE2_PWM = 45;  // PWMD
+constexpr uint8_t MOVE2_PWM = 47;  // PWMD
 constexpr uint8_t MOVE2_IN2 = 48;  // DIN2
-constexpr uint8_t MOVE2_IN1 = 47;  // DIN1
+constexpr uint8_t MOVE2_IN1 = 45;  // DIN1
 
 // Massage motor 2: B channel
 constexpr uint8_t MASSAGE2_PWM = 9;   // PWMB
@@ -235,7 +235,7 @@ void startTest() {
   systemState = SystemState::CLAMPING;
   systemStateStartedAt = millis();
   testStartedAt = systemStateStartedAt;
-  Serial.println("CloudLift v0.5.7 started: reverse displacement until target pressure");
+  Serial.println("CloudLift v0.5.8 started: reverse displacement until target pressure");
 }
 
 bool pressureIsFreeAndStable(uint32_t now) {
@@ -391,7 +391,7 @@ void setup() {
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.5.7 ready; GPIO17 STBY=HIGH; release pressure before start");
+  Serial.println("CloudLift v0.5.8 ready; GPIO17 STBY=HIGH; release pressure before start");
 }
 
 void loop() {
