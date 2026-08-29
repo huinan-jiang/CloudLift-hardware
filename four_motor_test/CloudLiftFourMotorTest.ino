@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor pressure-gated massage framework v0.5.0
+// CloudLift four-motor pressure-gated massage framework v0.5.2
 
 // Strain sensor module analog output. AO must stay within 0..3.3V.
 constexpr uint8_t STRAIN_AO_PIN = 14;
@@ -50,12 +50,13 @@ constexpr int8_t MASSAGE2_SIGN = -1;
 
 constexpr int MOVE_START_PWM = 255;
 constexpr int MOVE_HOLD_PWM = 200;
-constexpr int MASSAGE1_TARGET_PWM = 160;
+constexpr int MASSAGE1_TARGET_PWM = 200;
+constexpr int MASSAGE1_START_PWM = 255;
+constexpr uint32_t MASSAGE1_START_BOOST_MS = 500;
 constexpr int MASSAGE2_START_PWM = 255;
 constexpr int MASSAGE2_HOLD_PWM = 210;
 constexpr uint32_t POWER_ON_DELAY_MS = 3000;
-constexpr uint32_t MASSAGE_START_DELAY_MS = 500;
-constexpr uint32_t MASSAGE_SOFT_START_MS = 800;
+constexpr uint32_t MASSAGE_START_DELAY_MS = 0;
 constexpr uint32_t MASSAGE2_EXTRA_DELAY_MS = 300;
 constexpr uint32_t MASSAGE2_START_BOOST_MS = 250;
 constexpr uint32_t MOVE_START_BOOST_MS = 250;
@@ -161,8 +162,8 @@ int displacementPwm(uint32_t elapsed) {
 }
 
 int massagePwm(uint32_t elapsed) {
-  if (elapsed >= MASSAGE_SOFT_START_MS) return MASSAGE1_TARGET_PWM;
-  return map(elapsed, 0, MASSAGE_SOFT_START_MS, 0, MASSAGE1_TARGET_PWM);
+  return elapsed < MASSAGE1_START_BOOST_MS ? MASSAGE1_START_PWM
+                                          : MASSAGE1_TARGET_PWM;
 }
 
 void changeMovePhase(MovePhase next, uint32_t now) {
@@ -231,7 +232,7 @@ void startTest() {
   systemState = SystemState::CLAMPING;
   systemStateStartedAt = millis();
   testStartedAt = systemStateStartedAt;
-  Serial.println("CloudLift v0.5.0 started: clamping until target pressure");
+  Serial.println("CloudLift v0.5.2 started: clamping until target pressure");
 }
 
 void beginRelease(bool fault) {
@@ -307,6 +308,18 @@ const char* strainLevelName() {
   return "free";
 }
 
+const char* systemStateName() {
+  switch (systemState) {
+    case SystemState::WAITING: return "waiting";
+    case SystemState::CLAMPING: return "clamping";
+    case SystemState::MASSAGING: return "massaging";
+    case SystemState::RELEASING: return "releasing";
+    case SystemState::COMPLETE: return "complete";
+    case SystemState::FAULT: return "fault";
+  }
+  return "unknown";
+}
+
 void updateStrainSensor(uint32_t now) {
   if (now - lastStrainSampleAt >= STRAIN_SAMPLE_MS) {
     lastStrainSampleAt = now;
@@ -337,9 +350,9 @@ void updateStrainSensor(uint32_t now) {
   if (now - lastStrainReportAt >= STRAIN_REPORT_MS) {
     lastStrainReportAt = now;
     Serial.printf(
-        "strain raw=%d filtered=%d baseline=%d delta=%d level=%s min=%d max=%d\n",
+        "strain raw=%d filtered=%d baseline=%d delta=%d level=%s state=%s min=%d max=%d\n",
         strainRaw, strainFiltered, strainBaseline, strainDelta,
-        strainLevelName(), strainMinimum, strainMaximum);
+        strainLevelName(), systemStateName(), strainMinimum, strainMaximum);
   }
 }
 
@@ -360,7 +373,7 @@ void setup() {
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.5.0 ready; automatic start in 3 seconds");
+  Serial.println("CloudLift v0.5.2 ready; automatic start in 3 seconds");
 }
 
 void loop() {

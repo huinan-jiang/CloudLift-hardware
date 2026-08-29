@@ -1,4 +1,4 @@
-# ESP32-S3 四电机压力触发按摩框架 v0.5.0
+# ESP32-S3 四电机压力触发按摩框架 v0.5.2
 
 ## 接线
 
@@ -38,7 +38,7 @@
 GPIO14每20ms采样一次，串口监视器使用115200波特率，每200ms输出：
 
 ```text
-strain raw=1234 filtered=1228 baseline=1000 delta=228 level=contact min=980 max=1305
+strain raw=1234 filtered=1228 baseline=1000 delta=228 level=contact state=clamping min=980 max=1305
 ```
 
 - `raw`：当前12位ADC原始值，范围0～4095。
@@ -46,6 +46,7 @@ strain raw=1234 filtered=1228 baseline=1000 delta=228 level=contact min=980 max=
 - `baseline`：上电前1.5秒自动计算的无载零点。
 - `delta`：无载零点减去滤波值；该模块受力越大，AO读数越低。
 - `level`：当前应变等级。
+- `state`：当前控制状态，例如夹紧、按摩、释放或故障。
 - `min/max`：本次上电后的最小值和最大值。
 
 默认等级：
