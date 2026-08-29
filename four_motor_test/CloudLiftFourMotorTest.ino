@@ -7,7 +7,10 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor asynchronous bench test v0.3.1
+// CloudLift four-motor asynchronous test with strain monitoring v0.4.0
+
+// Strain sensor module analog output. AO must stay within 0..3.3V.
+constexpr uint8_t STRAIN_AO_PIN = 14;
 
 // Displacement motor 1: A channel
 constexpr uint8_t MOVE1_IN1 = 4;   // AIN1
@@ -59,6 +62,8 @@ constexpr uint32_t MOVE_START_BOOST_MS = 250;
 constexpr uint32_t MOVE_RUN_MS = 1000;
 constexpr uint32_t REVERSAL_PAUSE_MS = 600;
 constexpr uint32_t MAX_TEST_RUN_MS = 60000;
+constexpr uint32_t STRAIN_SAMPLE_MS = 20;
+constexpr uint32_t STRAIN_REPORT_MS = 200;
 
 enum class MovePhase {
   FORWARD,
@@ -73,6 +78,13 @@ uint32_t testStartedAt = 0;
 uint32_t movePhaseStartedAt = 0;
 bool testRunning = false;
 bool testFinished = false;
+uint32_t lastStrainSampleAt = 0;
+uint32_t lastStrainReportAt = 0;
+int strainRaw = 0;
+int strainFiltered = 0;
+int strainMinimum = 4095;
+int strainMaximum = 0;
+bool strainFilterReady = false;
 
 void attachPwm(uint8_t pin, uint8_t channel) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -192,11 +204,34 @@ void startTest() {
   testStartedAt = millis();
   movePhase = MovePhase::FORWARD;
   movePhaseStartedAt = testStartedAt;
-  Serial.println("CloudLift v0.3.1 four-motor test started");
+  Serial.println("CloudLift v0.4.0 four-motor test started");
+}
+
+void updateStrainSensor(uint32_t now) {
+  if (now - lastStrainSampleAt >= STRAIN_SAMPLE_MS) {
+    lastStrainSampleAt = now;
+    strainRaw = analogRead(STRAIN_AO_PIN);
+    if (!strainFilterReady) {
+      strainFiltered = strainRaw;
+      strainFilterReady = true;
+    } else {
+      strainFiltered = (strainFiltered * 7 + strainRaw) / 8;
+    }
+    strainMinimum = min(strainMinimum, strainRaw);
+    strainMaximum = max(strainMaximum, strainRaw);
+  }
+
+  if (now - lastStrainReportAt >= STRAIN_REPORT_MS) {
+    lastStrainReportAt = now;
+    Serial.printf("strain raw=%d filtered=%d min=%d max=%d\n",
+                  strainRaw, strainFiltered, strainMinimum, strainMaximum);
+  }
 }
 
 void setup() {
   Serial.begin(115200);
+  pinMode(STRAIN_AO_PIN, INPUT);
+  analogReadResolution(12);
 
   const uint8_t directionPins[] = {
       MOVE1_IN1, MOVE1_IN2, MASSAGE1_IN1, MASSAGE1_IN2,
@@ -210,11 +245,12 @@ void setup() {
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.3.1 ready; automatic start in 3 seconds");
+  Serial.println("CloudLift v0.4.0 ready; automatic start in 3 seconds");
 }
 
 void loop() {
   const uint32_t now = millis();
+  updateStrainSensor(now);
 
   if (!testRunning && !testFinished && now - bootAt >= POWER_ON_DELAY_MS) {
     startTest();
