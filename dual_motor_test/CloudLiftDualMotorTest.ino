@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift dual-motor asynchronous bench test v0.2.0
+// CloudLift dual-motor asynchronous bench test v0.2.2
 // Motor 1 = displacement motor; Motor 2 = massage motor.
 
 constexpr uint8_t MOVE_IN1 = 4;   // AIN1
@@ -23,7 +23,7 @@ constexpr uint8_t MASSAGE_PWM_CHANNEL = 1;  // Arduino-ESP32 2.x only
 constexpr uint32_t PWM_FREQUENCY = 20000;
 constexpr uint8_t PWM_RESOLUTION = 8;
 
-constexpr int MOVE_TARGET_PWM = 150;
+constexpr int MOVE_TARGET_PWM = 255;       // full power for loaded displacement motor
 constexpr int MASSAGE_TARGET_PWM = 160;
 constexpr int8_t MASSAGE_DIRECTION = +1;
 constexpr uint32_t POWER_ON_DELAY_MS = 3000;
@@ -87,7 +87,7 @@ void startTest() {
   testStartedAt = millis();
   movePhase = MovePhase::FORWARD;
   movePhaseStartedAt = testStartedAt;
-  Serial.println("v0.2.0 asynchronous test started");
+  Serial.println("v0.2.2 asynchronous test started");
 }
 
 void updateMassageMotor(uint32_t now) {
@@ -149,7 +149,7 @@ void setup() {
   attachPwm(MASSAGE_PWM, MASSAGE_PWM_CHANNEL);
   stopBothMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.2.0 ready; automatic start in 3 seconds");
+  Serial.println("CloudLift v0.2.2 ready; automatic start in 3 seconds");
 }
 
 void loop() {
@@ -173,4 +173,3 @@ void loop() {
 
   delay(2);  // only yields CPU time; motor timing uses millis()
 }
-
