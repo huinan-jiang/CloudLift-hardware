@@ -1,4 +1,4 @@
-# ESP32-S3 四电机异步与应变监测 v0.4.0
+# ESP32-S3 四电机异步与应变监测 v0.4.1
 
 ## 接线
 
@@ -39,11 +39,21 @@
 GPIO14每20ms采样一次，串口监视器使用115200波特率，每200ms输出：
 
 ```text
-strain raw=1234 filtered=1228 min=1180 max=1305
+strain raw=1234 filtered=1228 baseline=1000 delta=228 level=contact min=980 max=1305
 ```
 
 - `raw`：当前12位ADC原始值，范围0～4095。
 - `filtered`：一阶低通滤波值。
+- `baseline`：上电前1.5秒自动计算的无载零点。
+- `delta`：滤波值与无载零点的绝对差值。
+- `level`：当前应变等级。
 - `min/max`：本次上电后的最小值和最大值。
 
-v0.4.0仅监测应变数据，不使用该数值控制电机。先记录无载、轻压和较大压力的读数范围，再确定阈值。
+默认等级：
+
+- `free`：delta小于80。
+- `contact`：delta达到80。
+- `target`：delta达到300。
+- `over`：delta达到800。
+
+三个阈值分别由 `STRAIN_CONTACT_DELTA`、`STRAIN_TARGET_DELTA`、`STRAIN_OVERLOAD_DELTA` 设置。v0.4.1仅显示等级，不使用该数值控制电机。

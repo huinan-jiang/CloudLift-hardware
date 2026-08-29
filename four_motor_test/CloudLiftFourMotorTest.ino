@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor asynchronous test with strain monitoring v0.4.0
+// CloudLift four-motor asynchronous test with strain monitoring v0.4.1
 
 // Strain sensor module analog output. AO must stay within 0..3.3V.
 constexpr uint8_t STRAIN_AO_PIN = 14;
@@ -64,6 +64,10 @@ constexpr uint32_t REVERSAL_PAUSE_MS = 600;
 constexpr uint32_t MAX_TEST_RUN_MS = 60000;
 constexpr uint32_t STRAIN_SAMPLE_MS = 20;
 constexpr uint32_t STRAIN_REPORT_MS = 200;
+constexpr uint32_t STRAIN_CALIBRATION_MS = 1500;
+constexpr int STRAIN_CONTACT_DELTA = 80;
+constexpr int STRAIN_TARGET_DELTA = 300;
+constexpr int STRAIN_OVERLOAD_DELTA = 800;
 
 enum class MovePhase {
   FORWARD,
@@ -85,6 +89,11 @@ int strainFiltered = 0;
 int strainMinimum = 4095;
 int strainMaximum = 0;
 bool strainFilterReady = false;
+bool strainBaselineReady = false;
+uint32_t strainBaselineSum = 0;
+uint32_t strainBaselineSamples = 0;
+int strainBaseline = 0;
+int strainDelta = 0;
 
 void attachPwm(uint8_t pin, uint8_t channel) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -204,7 +213,15 @@ void startTest() {
   testStartedAt = millis();
   movePhase = MovePhase::FORWARD;
   movePhaseStartedAt = testStartedAt;
-  Serial.println("CloudLift v0.4.0 four-motor test started");
+  Serial.println("CloudLift v0.4.1 four-motor test started");
+}
+
+const char* strainLevelName() {
+  if (!strainBaselineReady) return "calibrating";
+  if (strainDelta >= STRAIN_OVERLOAD_DELTA) return "over";
+  if (strainDelta >= STRAIN_TARGET_DELTA) return "target";
+  if (strainDelta >= STRAIN_CONTACT_DELTA) return "contact";
+  return "free";
 }
 
 void updateStrainSensor(uint32_t now) {
@@ -219,12 +236,27 @@ void updateStrainSensor(uint32_t now) {
     }
     strainMinimum = min(strainMinimum, strainRaw);
     strainMaximum = max(strainMaximum, strainRaw);
+
+    if (!strainBaselineReady) {
+      if (now <= STRAIN_CALIBRATION_MS) {
+        strainBaselineSum += strainRaw;
+        strainBaselineSamples++;
+      } else if (strainBaselineSamples > 0) {
+        strainBaseline = strainBaselineSum / strainBaselineSamples;
+        strainBaselineReady = true;
+      }
+    }
+    if (strainBaselineReady) {
+      strainDelta = abs(strainFiltered - strainBaseline);
+    }
   }
 
   if (now - lastStrainReportAt >= STRAIN_REPORT_MS) {
     lastStrainReportAt = now;
-    Serial.printf("strain raw=%d filtered=%d min=%d max=%d\n",
-                  strainRaw, strainFiltered, strainMinimum, strainMaximum);
+    Serial.printf(
+        "strain raw=%d filtered=%d baseline=%d delta=%d level=%s min=%d max=%d\n",
+        strainRaw, strainFiltered, strainBaseline, strainDelta,
+        strainLevelName(), strainMinimum, strainMaximum);
   }
 }
 
@@ -245,7 +277,7 @@ void setup() {
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.4.0 ready; automatic start in 3 seconds");
+  Serial.println("CloudLift v0.4.1 ready; automatic start in 3 seconds");
 }
 
 void loop() {
