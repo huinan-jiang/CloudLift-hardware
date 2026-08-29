@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor pressure-gated massage framework v0.5.4
+// CloudLift four-motor pressure-gated massage framework v0.5.5
 
 // Strain sensor module analog output. AO must stay within 0..3.3V.
 constexpr uint8_t STRAIN_AO_PIN = 14;
@@ -56,6 +56,7 @@ constexpr uint32_t MASSAGE1_START_BOOST_MS = 500;
 constexpr int MASSAGE2_START_PWM = 255;
 constexpr int MASSAGE2_HOLD_PWM = 210;
 constexpr uint32_t POWER_ON_DELAY_MS = 3000;
+constexpr uint32_t FREE_STABLE_MS = 300;
 constexpr uint32_t MASSAGE_START_DELAY_MS = 0;
 constexpr uint32_t MASSAGE2_EXTRA_DELAY_MS = 300;
 constexpr uint32_t MASSAGE2_START_BOOST_MS = 250;
@@ -99,6 +100,7 @@ bool testRunning = false;
 bool testFinished = false;
 SystemState systemState = SystemState::WAITING;
 uint32_t systemStateStartedAt = 0;
+uint32_t freeSinceAt = 0;
 bool releaseToFault = false;
 uint32_t lastStrainSampleAt = 0;
 uint32_t lastStrainReportAt = 0;
@@ -232,7 +234,17 @@ void startTest() {
   systemState = SystemState::CLAMPING;
   systemStateStartedAt = millis();
   testStartedAt = systemStateStartedAt;
-  Serial.println("CloudLift v0.5.4 started: reverse displacement until target pressure");
+  Serial.println("CloudLift v0.5.5 started: reverse displacement until target pressure");
+}
+
+bool pressureIsFreeAndStable(uint32_t now) {
+  if (!strainBaselineReady || strainDelta >= STRAIN_CONTACT_DELTA) {
+    freeSinceAt = 0;
+    return false;
+  }
+
+  if (freeSinceAt == 0) freeSinceAt = now;
+  return now - freeSinceAt >= FREE_STABLE_MS;
 }
 
 void beginRelease(bool fault) {
@@ -376,14 +388,15 @@ void setup() {
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.5.4 ready; automatic start in 3 seconds");
+  Serial.println("CloudLift v0.5.5 ready; release pressure before automatic start");
 }
 
 void loop() {
   const uint32_t now = millis();
   updateStrainSensor(now);
 
-  if (!testRunning && !testFinished && now - bootAt >= POWER_ON_DELAY_MS) {
+  if (!testRunning && !testFinished &&
+      now - bootAt >= POWER_ON_DELAY_MS && pressureIsFreeAndStable(now)) {
     startTest();
   }
 
