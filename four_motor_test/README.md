@@ -1,4 +1,4 @@
-# ESP32-S3 四电机异步与应变监测 v0.4.2
+# ESP32-S3 四电机异步与应变监测 v0.4.3
 
 ## 接线
 
@@ -51,9 +51,9 @@ strain raw=1234 filtered=1228 baseline=1000 delta=228 level=contact min=980 max=
 
 默认等级：
 
-- `free`：delta小于500。
-- `contact`：delta达到500。
-- `target`：delta达到2000。
-- `over`：delta达到3200。
+- `free`：delta小于250。
+- `contact`：delta达到250。
+- `target`：delta达到600。
+- `over`：delta达到1200。
 
-三个阈值分别由 `STRAIN_CONTACT_DELTA`、`STRAIN_TARGET_DELTA`、`STRAIN_OVERLOAD_DELTA` 设置。v0.4.2仅显示等级，不使用该数值控制电机。
+三个阈值分别由 `STRAIN_CONTACT_DELTA`、`STRAIN_TARGET_DELTA`、`STRAIN_OVERLOAD_DELTA` 设置。v0.4.3仅显示等级，不使用该数值控制电机。
