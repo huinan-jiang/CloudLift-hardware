@@ -1,4 +1,4 @@
-# ESP32-S3 四电机压力触发按摩框架 v0.5.5
+# ESP32-S3 四电机压力触发按摩框架 v0.5.6
 
 ## 接线
 
@@ -7,6 +7,7 @@
 - 位移电机2：GPIO45 → PWMD，GPIO48 → DIN2，GPIO47 → DIN1。
 - 按摩电机2：GPIO9 → PWMB，GPIO10 → BIN2，GPIO11 → BIN1。
 - 应变模块：AO → GPIO14，GND必须与ESP32共地。
+- 两块TB6612共用STBY → GPIO17，程序上电后主动输出HIGH。
 
 应变模块AO电压必须处于0～3.3V。模块若使用5V供电且AO可能超过3.3V，必须加分压或电平转换，禁止直接接入ESP32-S3。
 

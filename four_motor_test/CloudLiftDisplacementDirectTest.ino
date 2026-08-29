@@ -1,6 +1,6 @@
 #include <Arduino.h>
 
-// CloudLift ESP32-S3 displacement-motor direct diagnostic v1.0
+// CloudLift ESP32-S3 displacement-motor direct diagnostic v1.1
 // This sketch intentionally bypasses the strain sensor, massage motors,
 // pressure state machine and LEDC PWM. PWM pins are driven HIGH for 100% duty.
 
@@ -13,6 +13,9 @@ constexpr uint8_t MOVE1_PWM = 6;   // PWMA
 constexpr uint8_t MOVE2_IN1 = 47;  // DIN1
 constexpr uint8_t MOVE2_IN2 = 48;  // DIN2
 constexpr uint8_t MOVE2_PWM = 45;  // PWMD
+
+// Both TB6612 boards share the standby control used by the working firmware.
+constexpr uint8_t STBY_PIN = 17;
 
 constexpr uint32_t CYCLE_MS = 14000;
 int lastStage = -1;
@@ -66,6 +69,9 @@ void setStage(int stage) {
 void setup() {
   Serial.begin(115200);
 
+  pinMode(STBY_PIN, OUTPUT);
+  digitalWrite(STBY_PIN, HIGH);
+
   const uint8_t pins[] = {
       MOVE1_IN1, MOVE1_IN2, MOVE1_PWM,
       MOVE2_IN1, MOVE2_IN2, MOVE2_PWM};
@@ -73,7 +79,7 @@ void setup() {
 
   stopBoth();
   cycleStartedAt = millis();
-  Serial.println("CloudLift displacement direct diagnostic v1.0 ready");
+  Serial.println("CloudLift displacement direct diagnostic v1.1; GPIO17 STBY=HIGH");
 }
 
 void loop() {
