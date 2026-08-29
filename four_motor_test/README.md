@@ -53,7 +53,7 @@ strain raw=1234 filtered=1228 baseline=1000 delta=228 level=contact min=980 max=
 - `free`：delta小于200。
 - `contact`：delta达到200。
 - `target`：delta达到1000，开始按摩。
-- `over`：delta达到2500，安全释放并停机。
+- `over`：delta达到3800，安全释放并停机（当前为临时架空测试值）。
 
 三个阈值分别由 `STRAIN_CONTACT_DELTA`、`STRAIN_TARGET_DELTA`、`STRAIN_OVERLOAD_DELTA` 设置。v0.5.0开始使用 `target` 和 `over` 等级控制动作流程。
 夹紧最长时间由 `CLAMP_TIMEOUT_MS` 设置，释放时间由 `RELEASE_RUN_MS` 设置。当前默认值是10秒和1秒，后续可根据实际压力和行程调整。

@@ -70,7 +70,9 @@ constexpr uint32_t STRAIN_CALIBRATION_MS = 1500;
 // This module rests near 4095 and its AO value falls as force increases.
 constexpr int STRAIN_CONTACT_DELTA = 200;
 constexpr int STRAIN_TARGET_DELTA = 1000;
-constexpr int STRAIN_OVERLOAD_DELTA = 2500;
+// Temporary bench-test value: current setup reaches about delta=3100.
+// Recalibrate this lower after the strain amplifier and safe pressure are known.
+constexpr int STRAIN_OVERLOAD_DELTA = 3800;
 
 enum class MovePhase {
   FORWARD,
