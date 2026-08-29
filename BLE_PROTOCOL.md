@@ -1,4 +1,4 @@
-# CloudLift ESP32 ↔ APP BLE 通信协议 v2.0
+# CloudLift ESP32 ↔ APP BLE 通信协议 v2.1
 
 当前默认固件是 `ble_motor_control/CloudLiftBleMotorControl.ino`。上电后所有电机停止；应变片只采样和上报，不参与电机控制。APP通过BLE命令控制位移电机和按摩电机。
 
@@ -47,6 +47,8 @@
 {"cmd":"START"}
 {"cmd":"PAUSE"}
 {"cmd":"SET_SPEED","value":3}
+{"cmd":"SET_GEAR","gear":2}
+{"cmd":"SET_MODE","mode":0}
 {"cmd":"PING"}
 {"cmd":"GET_STATUS"}
 ```
@@ -55,25 +57,34 @@
 - `PAUSE`：停止按摩电机，位移电机状态不变；APP需要暂停全部动作时应使用 `STOP_ALL`。
 - `STOP_ALL`：停止四台电机。
 - `SET_SPEED`：设置按摩速度等级1～5，对应PWM 120/150/180/210/240。
-- `PING`：保持运行许可。电机运行时APP至少每5秒发送一次，否则10秒无命令会自动停机。
+- `SET_GEAR`：档位1/2/3分别为默认速度、默认速度的1/2和1/3，也可使用 `{"cmd":"GEAR","value":2}`。
+- `SET_MODE`：立即启动自动模式0～2，也可使用 `{"cmd":"MODE","value":1}`。
+- `PING`：保持手动运行许可。手动控制时APP至少每5秒发送一次，否则10秒无命令会自动停机。
 - `GET_STATUS`：请求立即发送一次状态包。
+
+### 自动模式
+
+- 模式0：位移电机运行10秒；随后按摩电机以设定速度的1/3运行60秒；完成后全部停止。
+- 模式1：位移电机运行10秒；按摩依次以1/3、2/3、全速运行90秒、90秒、120秒；完成后全部停止。
+- 模式2：位移电机运行10秒；按摩依次以全速、2/3、1/3运行90秒、90秒、120秒；完成后全部停止。
+- 自动模式期间不需要 `PING`，但BLE断开仍会立即停止全部电机。发送手动动作、速度或档位命令会退出自动模式。
 
 ## 状态上报
 
 Telemetry每500ms Notify一次，示例：
 
 ```json
-{"version":"1.0","state":"massaging","move":0,"massage":200,"strain_raw":1200,"strain_delta":2895,"baseline":4095,"fault":"none"}
+{"version":"1.0","state":"massaging","move":0,"move_pwm":0,"massage":200,"gear":1,"mode":0,"mode_stage":"massage_1","strain_raw":1200,"strain_delta":2895,"baseline":4095,"fault":"none"}
 ```
 
-`state`可取：`idle`、`moving`、`massaging`、`combined`。`move`为-1/0/1，`massage`为当前PWM值。应变值为GPIO14的12位ADC原始值和相对零点差值，暂不代表公斤或牛顿。
+`state`可取：`idle`、`moving`、`massaging`、`combined`。`move`为-1/0/1，`move_pwm`和`massage`为当前PWM值，`gear`为当前档位，`mode`为-1（手动）或0～2，`mode_stage`显示当前自动阶段。应变值为GPIO14的12位ADC原始值和相对零点差值，暂不代表公斤或牛顿。
 
 `fault`可取：`none`、`ble_disconnected`、`command_timeout`。发生断开或命令超时后全部电机停止。
 
 ## APP要求
 
 1. 连接后发现上述Service，并订阅Telemetry Notify。
-2. 电机运行期间每5秒内发送一次 `PING`。
+2. 手动控制电机期间每5秒内发送一次 `PING`；自动模式不需要。
 3. 页面始终提供 `STOP_ALL`，不要只依赖页面返回或断开连接。
 4. 不要根据应变值在APP内自行驱动电机；当前应变值只用于显示。
 

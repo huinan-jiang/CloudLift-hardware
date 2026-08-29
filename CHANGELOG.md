@@ -1,5 +1,12 @@
 # 更新记录
 
+## v1.1.0
+
+- 采用用户提供的 `CloudLiftBleMotorControl_modes.ino` 作为最新默认固件。
+- 新增模式0/1/2的自动时序流程和1/2/3三档速度控制。
+- 位移电机改为LEDC PWM输出，遥测新增move_pwm、gear、mode和mode_stage。
+- 保持已确认引脚、上电停机、BLE断开停机和应变片仅上报行为不变。
+
 ## v1.0.0
 
 - 新增当前硬件接线对应的 Arduino BLE 手动控制固件。

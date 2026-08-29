@@ -39,6 +39,8 @@ constexpr uint8_t STRAIN_AO_PIN = 14;
 
 constexpr uint8_t MASSAGE1_CHANNEL = 0;
 constexpr uint8_t MASSAGE2_CHANNEL = 1;
+constexpr uint8_t MOVE1_CHANNEL = 2;
+constexpr uint8_t MOVE2_CHANNEL = 3;
 constexpr uint32_t PWM_FREQUENCY = 20000;
 constexpr uint8_t PWM_RESOLUTION = 8;
 constexpr uint32_t STRAIN_SAMPLE_MS = 20;
@@ -46,6 +48,13 @@ constexpr uint32_t TELEMETRY_MS = 500;
 constexpr uint32_t STRAIN_CALIBRATION_MS = 1500;
 constexpr uint32_t COMMAND_TIMEOUT_MS = 10000;
 constexpr size_t MAX_COMMAND_BYTES = 192;
+constexpr int DEFAULT_MOVE_SPEED = 255;
+constexpr int DEFAULT_MASSAGE_SPEED = 200;
+constexpr int MODE_MOVE_DIRECTION = +1;
+constexpr uint32_t MODE_MOVE_MS = 10000;
+constexpr uint32_t MODE0_MASSAGE_MS = 60000;
+constexpr uint32_t MODE_STAGE_90S_MS = 90000;
+constexpr uint32_t MODE_STAGE_120S_MS = 120000;
 
 constexpr char DEVICE_NAME[] = "CloudLift";
 constexpr char SERVICE_UUID[] = "7e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -59,8 +68,14 @@ volatile bool disconnectPending = false;
 bool statusRequested = false;
 
 int moveDirection = 0;  // -1 or +1; 0=stop
-int massageSpeed = 0;   // 0..255
-int configuredMassageSpeed = 200;
+int moveSpeed = 0;      // actual PWM duty, 0..255
+int massageSpeed = 0;   // actual PWM duty, 0..255
+int configuredMassageSpeed = DEFAULT_MASSAGE_SPEED;
+int activeMassageBaseSpeed = 0;
+int currentGear = 1;    // 1=default, 2=1/2 default, 3=1/3 default
+int activeMode = -1;    // -1=manual/no auto mode; 0..2=running mode
+uint8_t modeStage = 0;  // 0=idle, 1=move, 2..4=massage stages
+uint32_t modeStageStartedAt = 0;
 const char* faultCode = "none";
 uint32_t lastCommandAt = 0;
 
@@ -100,26 +115,47 @@ void drivePwmMotor(uint8_t in1, uint8_t in2, uint8_t pwm, uint8_t channel,
   writePwm(pwm, channel, abs(speed));
 }
 
-void driveDirectMotor(uint8_t in1, uint8_t in2, uint8_t pwm, int direction) {
-  digitalWrite(in1, direction > 0 ? HIGH : LOW);
-  digitalWrite(in2, direction < 0 ? HIGH : LOW);
-  digitalWrite(pwm, direction == 0 ? LOW : HIGH);
+int speedForGear(int defaultSpeed) {
+  defaultSpeed = constrain(defaultSpeed, 0, 255);
+  const int gear = constrain(currentGear, 1, 3);
+  return defaultSpeed / gear;
 }
 
 void setMove(int direction) {
   moveDirection = constrain(direction, -1, 1);
+  moveSpeed = moveDirection == 0 ? 0 : speedForGear(DEFAULT_MOVE_SPEED);
   // Both displacement motors use the same confirmed electrical direction.
-  driveDirectMotor(MOVE1_IN1, MOVE1_IN2, MOVE1_PWM, moveDirection);
-  driveDirectMotor(MOVE2_IN1, MOVE2_IN2, MOVE2_PWM, moveDirection);
+  drivePwmMotor(MOVE1_IN1, MOVE1_IN2, MOVE1_PWM, MOVE1_CHANNEL,
+                moveDirection * moveSpeed);
+  drivePwmMotor(MOVE2_IN1, MOVE2_IN2, MOVE2_PWM, MOVE2_CHANNEL,
+                moveDirection * moveSpeed);
 }
 
-void setMassage(int speed) {
-  massageSpeed = constrain(speed, 0, 255);
+void writeMassageDuty(int duty) {
+  massageSpeed = constrain(duty, 0, 255);
   drivePwmMotor(MASSAGE1_IN1, MASSAGE1_IN2, MASSAGE1_PWM,
                 MASSAGE1_CHANNEL, massageSpeed);
   // The second massage motor is electrically mirrored.
   drivePwmMotor(MASSAGE2_IN1, MASSAGE2_IN2, MASSAGE2_PWM,
                 MASSAGE2_CHANNEL, -massageSpeed);
+}
+
+void setMassage(int speed) {
+  activeMassageBaseSpeed = constrain(speed, 0, 255);
+  massageSpeed = activeMassageBaseSpeed == 0 ? 0 : speedForGear(activeMassageBaseSpeed);
+  writeMassageDuty(massageSpeed);
+}
+
+void setGear(int gear) {
+  currentGear = constrain(gear, 1, 3);
+  if (moveDirection != 0) setMove(moveDirection);
+  if (activeMassageBaseSpeed != 0) setMassage(activeMassageBaseSpeed);
+}
+
+void cancelMode() {
+  activeMode = -1;
+  modeStage = 0;
+  modeStageStartedAt = 0;
 }
 
 void stopAll() {
@@ -134,6 +170,93 @@ const char* stateName() {
   if (moveDirection != 0) return "moving";
   if (massageSpeed != 0) return "massaging";
   return "idle";
+}
+
+const char* modeStageName() {
+  if (activeMode < 0) return "manual";
+  if (modeStage == 1) return "move";
+  if (modeStage == 2) return "massage_1";
+  if (modeStage == 3) return "massage_2";
+  if (modeStage == 4) return "massage_3";
+  return "idle";
+}
+
+int scaledMassageSpeed(int numerator, int denominator) {
+  const int base = constrain(configuredMassageSpeed, 0, 255);
+  return constrain((base * numerator) / denominator, 0, 255);
+}
+
+int modeMassageDuty() {
+  if (activeMode == 0) return scaledMassageSpeed(1, 3);
+  if (activeMode == 1 && modeStage == 2) return scaledMassageSpeed(1, 3);
+  if (activeMode == 1 && modeStage == 3) return scaledMassageSpeed(2, 3);
+  if (activeMode == 1 && modeStage == 4) return scaledMassageSpeed(1, 1);
+  if (activeMode == 2 && modeStage == 2) return scaledMassageSpeed(1, 1);
+  if (activeMode == 2 && modeStage == 3) return scaledMassageSpeed(2, 3);
+  if (activeMode == 2 && modeStage == 4) return scaledMassageSpeed(1, 3);
+  return 0;
+}
+
+uint32_t modeStageDurationMs() {
+  if (modeStage == 1) return MODE_MOVE_MS;
+  if (activeMode == 0 && modeStage == 2) return MODE0_MASSAGE_MS;
+  if ((activeMode == 1 || activeMode == 2) && modeStage == 2) {
+    return MODE_STAGE_90S_MS;
+  }
+  if ((activeMode == 1 || activeMode == 2) && modeStage == 3) {
+    return MODE_STAGE_90S_MS;
+  }
+  if ((activeMode == 1 || activeMode == 2) && modeStage == 4) {
+    return MODE_STAGE_120S_MS;
+  }
+  return 0;
+}
+
+void enterModeStage(uint8_t stage) {
+  modeStage = stage;
+  modeStageStartedAt = millis();
+  if (stage == 1) {
+    setMassage(0);
+    setMove(MODE_MOVE_DIRECTION);
+  } else {
+    setMove(0);
+    activeMassageBaseSpeed = configuredMassageSpeed;
+    writeMassageDuty(modeMassageDuty());
+  }
+  statusRequested = true;
+}
+
+void startMode(int mode) {
+  activeMode = constrain(mode, 0, 2);
+  currentGear = 1;
+  enterModeStage(1);
+}
+
+void finishMode() {
+  stopAll();
+  cancelMode();
+  statusRequested = true;
+}
+
+void updateMode(uint32_t now) {
+  if (activeMode < 0 || modeStage == 0) return;
+  const uint32_t duration = modeStageDurationMs();
+  if (duration == 0 || now - modeStageStartedAt < duration) return;
+
+  if (activeMode == 0) {
+    if (modeStage == 1) {
+      enterModeStage(2);
+    } else {
+      finishMode();
+    }
+    return;
+  }
+
+  if (modeStage < 4) {
+    enterModeStage(modeStage + 1);
+  } else {
+    finishMode();
+  }
 }
 
 bool readStringJson(const char* source, const char* key, char* output,
@@ -174,6 +297,9 @@ void processCommand(const char* json) {
 
   lastCommandAt = millis();
   faultCode = "none";
+  const bool statusOnly = !strcmp(command, "PING") || !strcmp(command, "GET_STATUS");
+  const bool modeCommand = !strcmp(command, "SET_MODE") || !strcmp(command, "MODE");
+  if (!statusOnly && !modeCommand) cancelMode();
 
   if (!strcmp(command, "MOVE")) {
     setMove(readIntJson(json, "direction", 0));
@@ -196,6 +322,20 @@ void processCommand(const char* json) {
     static constexpr uint8_t levels[] = {120, 150, 180, 210, 240};
     configuredMassageSpeed = levels[level - 1];
     if (massageSpeed != 0) setMassage(configuredMassageSpeed);
+  } else if (!strcmp(command, "SET_GEAR") || !strcmp(command, "GEAR")) {
+    int gear = readIntJson(json, "gear", 0);
+    if (gear == 0) gear = readIntJson(json, "value", 1);
+    setGear(gear);
+  } else if (!strcmp(command, "SET_MODE") || !strcmp(command, "MODE")) {
+    int mode = readIntJson(json, "mode", -1);
+    if (mode < 0) mode = readIntJson(json, "value", -1);
+    if (mode < 0 || mode > 2) {
+      faultCode = "invalid_mode";
+      Serial.printf("BLE command rejected: invalid mode %d\n", mode);
+      statusRequested = true;
+      return;
+    }
+    startMode(mode);
   } else if (!strcmp(command, "PING") || !strcmp(command, "GET_STATUS")) {
     statusRequested = true;
   } else {
@@ -203,8 +343,10 @@ void processCommand(const char* json) {
     return;
   }
 
-  Serial.printf("BLE cmd=%s move=%d massage=%d\n", command, moveDirection,
-                massageSpeed);
+  Serial.printf(
+      "BLE cmd=%s mode=%d stage=%s gear=%d move=%d move_pwm=%d massage=%d\n",
+      command, activeMode, modeStageName(), currentGear, moveDirection,
+      moveSpeed, massageSpeed);
   statusRequested = true;
 }
 
@@ -237,10 +379,13 @@ void publishTelemetry() {
   const int written = snprintf(
       buffer, sizeof(buffer),
       "{\"version\":\"1.0\",\"state\":\"%s\",\"move\":%d,"
-      "\"massage\":%d,\"strain_raw\":%d,\"strain_delta\":%d,"
+      "\"move_pwm\":%d,\"massage\":%d,\"gear\":%d,"
+      "\"mode\":%d,\"mode_stage\":\"%s\","
+      "\"strain_raw\":%d,\"strain_delta\":%d,"
       "\"baseline\":%d,\"fault\":\"%s\"}",
-      stateName(), moveDirection, massageSpeed, strainRaw, strainDelta,
-      strainBaseline, faultCode);
+      stateName(), moveDirection, moveSpeed, massageSpeed, currentGear,
+      activeMode, modeStageName(), strainRaw, strainDelta, strainBaseline,
+      faultCode);
   if (written <= 0 || written >= static_cast<int>(sizeof(buffer))) return;
   telemetryCharacteristic->setValue(reinterpret_cast<uint8_t*>(buffer),
                                      static_cast<size_t>(written));
@@ -316,6 +461,8 @@ void setup() {
   pinMode(MASSAGE1_IN2, OUTPUT);
   pinMode(MASSAGE2_IN1, OUTPUT);
   pinMode(MASSAGE2_IN2, OUTPUT);
+  attachPwm(MOVE1_PWM, MOVE1_CHANNEL);
+  attachPwm(MOVE2_PWM, MOVE2_CHANNEL);
   attachPwm(MASSAGE1_PWM, MASSAGE1_CHANNEL);
   attachPwm(MASSAGE2_PWM, MASSAGE2_CHANNEL);
   stopAll();
@@ -331,6 +478,7 @@ void loop() {
   if (disconnectPending) {
     disconnectPending = false;
     stopAll();
+    cancelMode();
     faultCode = "ble_disconnected";
     statusRequested = true;
   }
@@ -341,7 +489,9 @@ void loop() {
     processCommand(command.json);
   }
 
-  if (bleConnected && motorsActive() &&
+  updateMode(millis());
+
+  if (bleConnected && motorsActive() && activeMode < 0 &&
       now - lastCommandAt > COMMAND_TIMEOUT_MS) {
     stopAll();
     faultCode = "command_timeout";
