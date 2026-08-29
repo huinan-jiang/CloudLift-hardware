@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor pressure-gated massage framework v0.5.9
+// CloudLift four-motor pressure-gated massage framework v0.6.0
 
 // Strain sensor module analog output. AO must stay within 0..3.3V.
 constexpr uint8_t STRAIN_AO_PIN = 14;
@@ -141,11 +141,17 @@ void driveMotor(uint8_t in1, uint8_t in2, uint8_t pwmPin,
   writePwm(pwmPin, channel, abs(speed));
 }
 
+void driveMotorDirect(uint8_t in1, uint8_t in2, uint8_t pwmPin, int speed) {
+  digitalWrite(in1, speed > 0 ? HIGH : LOW);
+  digitalWrite(in2, speed < 0 ? HIGH : LOW);
+  digitalWrite(pwmPin, speed == 0 ? LOW : HIGH);
+}
+
 void driveDisplacementPair(int speed) {
-  driveMotor(MOVE1_IN1, MOVE1_IN2, MOVE1_PWM, MOVE1_CHANNEL,
-             MOVE1_SIGN * speed);
-  driveMotor(MOVE2_IN1, MOVE2_IN2, MOVE2_PWM, MOVE2_CHANNEL,
-             MOVE2_SIGN * speed);
+  driveMotorDirect(MOVE1_IN1, MOVE1_IN2, MOVE1_PWM,
+                   MOVE1_SIGN * speed);
+  driveMotorDirect(MOVE2_IN1, MOVE2_IN2, MOVE2_PWM,
+                   MOVE2_SIGN * speed);
 }
 
 void driveMassageMotors(int massage1Speed, int massage2Speed) {
@@ -235,7 +241,7 @@ void startTest() {
   systemState = SystemState::CLAMPING;
   systemStateStartedAt = millis();
   testStartedAt = systemStateStartedAt;
-  Serial.println("CloudLift v0.5.9 started: both displacement motors reverse until target");
+  Serial.println("CloudLift v0.6.0 started: direct-drive displacement until target");
 }
 
 bool pressureIsFreeAndStable(uint32_t now) {
@@ -379,19 +385,18 @@ void setup() {
   pinMode(STRAIN_AO_PIN, INPUT);
   analogReadResolution(12);
 
-  const uint8_t directionPins[] = {
+  const uint8_t digitalOutputPins[] = {
       MOVE1_IN1, MOVE1_IN2, MASSAGE1_IN1, MASSAGE1_IN2,
-      MOVE2_IN1, MOVE2_IN2, MASSAGE2_IN1, MASSAGE2_IN2};
-  for (uint8_t pin : directionPins) pinMode(pin, OUTPUT);
+      MOVE2_IN1, MOVE2_IN2, MASSAGE2_IN1, MASSAGE2_IN2,
+      MOVE1_PWM, MOVE2_PWM};
+  for (uint8_t pin : digitalOutputPins) pinMode(pin, OUTPUT);
 
-  attachPwm(MOVE1_PWM, MOVE1_CHANNEL);
   attachPwm(MASSAGE1_PWM, MASSAGE1_CHANNEL);
-  attachPwm(MOVE2_PWM, MOVE2_CHANNEL);
   attachPwm(MASSAGE2_PWM, MASSAGE2_CHANNEL);
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.5.9 ready; GPIO17 STBY=HIGH; release pressure before start");
+  Serial.println("CloudLift v0.6.0 ready; displacement PWM pins use direct HIGH output");
 }
 
 void loop() {
