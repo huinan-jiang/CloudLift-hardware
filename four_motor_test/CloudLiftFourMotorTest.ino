@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor pressure-gated massage framework v0.5.8
+// CloudLift four-motor pressure-gated massage framework v0.5.9
 
 // Strain sensor module analog output. AO must stay within 0..3.3V.
 constexpr uint8_t STRAIN_AO_PIN = 14;
@@ -42,10 +42,10 @@ constexpr uint32_t PWM_FREQUENCY = 20000;
 constexpr uint8_t PWM_RESOLUTION = 8;
 
 // Change one sign if its motor rotates opposite to the required physical motion.
-// The second motor in each pair defaults to the opposite electrical direction
-// because the left/right mechanisms are normally mirrored.
+// Both displacement motors use the same electrical reverse direction during
+// clamping, matching the confirmed direct-test behavior.
 constexpr int8_t MOVE1_SIGN = +1;
-constexpr int8_t MOVE2_SIGN = -1;
+constexpr int8_t MOVE2_SIGN = +1;
 constexpr int8_t MASSAGE1_SIGN = +1;
 constexpr int8_t MASSAGE2_SIGN = -1;
 
@@ -235,7 +235,7 @@ void startTest() {
   systemState = SystemState::CLAMPING;
   systemStateStartedAt = millis();
   testStartedAt = systemStateStartedAt;
-  Serial.println("CloudLift v0.5.8 started: reverse displacement until target pressure");
+  Serial.println("CloudLift v0.5.9 started: both displacement motors reverse until target");
 }
 
 bool pressureIsFreeAndStable(uint32_t now) {
@@ -391,7 +391,7 @@ void setup() {
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.5.8 ready; GPIO17 STBY=HIGH; release pressure before start");
+  Serial.println("CloudLift v0.5.9 ready; GPIO17 STBY=HIGH; release pressure before start");
 }
 
 void loop() {
