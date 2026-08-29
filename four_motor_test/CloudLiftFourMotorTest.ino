@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor asynchronous test with strain monitoring v0.4.1
+// CloudLift four-motor asynchronous test with strain monitoring v0.4.2
 
 // Strain sensor module analog output. AO must stay within 0..3.3V.
 constexpr uint8_t STRAIN_AO_PIN = 14;
@@ -65,9 +65,10 @@ constexpr uint32_t MAX_TEST_RUN_MS = 60000;
 constexpr uint32_t STRAIN_SAMPLE_MS = 20;
 constexpr uint32_t STRAIN_REPORT_MS = 200;
 constexpr uint32_t STRAIN_CALIBRATION_MS = 1500;
-constexpr int STRAIN_CONTACT_DELTA = 80;
-constexpr int STRAIN_TARGET_DELTA = 300;
-constexpr int STRAIN_OVERLOAD_DELTA = 800;
+// This module rests near 4095 and its AO value falls as force increases.
+constexpr int STRAIN_CONTACT_DELTA = 500;
+constexpr int STRAIN_TARGET_DELTA = 2000;
+constexpr int STRAIN_OVERLOAD_DELTA = 3200;
 
 enum class MovePhase {
   FORWARD,
@@ -213,7 +214,7 @@ void startTest() {
   testStartedAt = millis();
   movePhase = MovePhase::FORWARD;
   movePhaseStartedAt = testStartedAt;
-  Serial.println("CloudLift v0.4.1 four-motor test started");
+  Serial.println("CloudLift v0.4.2 four-motor test started");
 }
 
 const char* strainLevelName() {
@@ -247,7 +248,7 @@ void updateStrainSensor(uint32_t now) {
       }
     }
     if (strainBaselineReady) {
-      strainDelta = abs(strainFiltered - strainBaseline);
+      strainDelta = max(0, strainBaseline - strainFiltered);
     }
   }
 
@@ -277,7 +278,7 @@ void setup() {
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.4.1 ready; automatic start in 3 seconds");
+  Serial.println("CloudLift v0.4.2 ready; automatic start in 3 seconds");
 }
 
 void loop() {

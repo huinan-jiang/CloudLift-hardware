@@ -1,4 +1,4 @@
-# ESP32-S3 四电机异步与应变监测 v0.4.1
+# ESP32-S3 四电机异步与应变监测 v0.4.2
 
 ## 接线
 
@@ -45,15 +45,15 @@ strain raw=1234 filtered=1228 baseline=1000 delta=228 level=contact min=980 max=
 - `raw`：当前12位ADC原始值，范围0～4095。
 - `filtered`：一阶低通滤波值。
 - `baseline`：上电前1.5秒自动计算的无载零点。
-- `delta`：滤波值与无载零点的绝对差值。
+- `delta`：无载零点减去滤波值；该模块受力越大，AO读数越低。
 - `level`：当前应变等级。
 - `min/max`：本次上电后的最小值和最大值。
 
 默认等级：
 
-- `free`：delta小于80。
-- `contact`：delta达到80。
-- `target`：delta达到300。
-- `over`：delta达到800。
+- `free`：delta小于500。
+- `contact`：delta达到500。
+- `target`：delta达到2000。
+- `over`：delta达到3200。
 
-三个阈值分别由 `STRAIN_CONTACT_DELTA`、`STRAIN_TARGET_DELTA`、`STRAIN_OVERLOAD_DELTA` 设置。v0.4.1仅显示等级，不使用该数值控制电机。
+三个阈值分别由 `STRAIN_CONTACT_DELTA`、`STRAIN_TARGET_DELTA`、`STRAIN_OVERLOAD_DELTA` 设置。v0.4.2仅显示等级，不使用该数值控制电机。
