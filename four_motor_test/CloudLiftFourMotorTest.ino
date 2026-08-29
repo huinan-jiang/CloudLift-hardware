@@ -7,7 +7,7 @@
 #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-// CloudLift four-motor asynchronous test with strain monitoring v0.4.3
+// CloudLift four-motor pressure-gated massage framework v0.5.0
 
 // Strain sensor module analog output. AO must stay within 0..3.3V.
 constexpr uint8_t STRAIN_AO_PIN = 14;
@@ -62,13 +62,15 @@ constexpr uint32_t MOVE_START_BOOST_MS = 250;
 constexpr uint32_t MOVE_RUN_MS = 1000;
 constexpr uint32_t REVERSAL_PAUSE_MS = 600;
 constexpr uint32_t MAX_TEST_RUN_MS = 60000;
+constexpr uint32_t CLAMP_TIMEOUT_MS = 10000;
+constexpr uint32_t RELEASE_RUN_MS = 1000;
 constexpr uint32_t STRAIN_SAMPLE_MS = 20;
 constexpr uint32_t STRAIN_REPORT_MS = 200;
 constexpr uint32_t STRAIN_CALIBRATION_MS = 1500;
 // This module rests near 4095 and its AO value falls as force increases.
-constexpr int STRAIN_CONTACT_DELTA = 250;
-constexpr int STRAIN_TARGET_DELTA = 600;
-constexpr int STRAIN_OVERLOAD_DELTA = 1200;
+constexpr int STRAIN_CONTACT_DELTA = 200;
+constexpr int STRAIN_TARGET_DELTA = 1000;
+constexpr int STRAIN_OVERLOAD_DELTA = 2500;
 
 enum class MovePhase {
   FORWARD,
@@ -77,12 +79,24 @@ enum class MovePhase {
   PAUSE_BEFORE_FORWARD
 };
 
+enum class SystemState {
+  WAITING,
+  CLAMPING,
+  MASSAGING,
+  RELEASING,
+  COMPLETE,
+  FAULT
+};
+
 MovePhase movePhase = MovePhase::FORWARD;
 uint32_t bootAt = 0;
 uint32_t testStartedAt = 0;
 uint32_t movePhaseStartedAt = 0;
 bool testRunning = false;
 bool testFinished = false;
+SystemState systemState = SystemState::WAITING;
+uint32_t systemStateStartedAt = 0;
+bool releaseToFault = false;
 uint32_t lastStrainSampleAt = 0;
 uint32_t lastStrainReportAt = 0;
 int strainRaw = 0;
@@ -211,10 +225,76 @@ void updateMassagePair(uint32_t now) {
 
 void startTest() {
   testRunning = true;
-  testStartedAt = millis();
-  movePhase = MovePhase::FORWARD;
-  movePhaseStartedAt = testStartedAt;
-  Serial.println("CloudLift v0.4.3 four-motor test started");
+  testFinished = false;
+  systemState = SystemState::CLAMPING;
+  systemStateStartedAt = millis();
+  testStartedAt = systemStateStartedAt;
+  Serial.println("CloudLift v0.5.0 started: clamping until target pressure");
+}
+
+void beginRelease(bool fault) {
+  releaseToFault = fault;
+  systemState = SystemState::RELEASING;
+  systemStateStartedAt = millis();
+  driveMassageMotors(0, 0);
+  Serial.println(fault ? "Pressure safety release" : "Massage time complete; releasing");
+}
+
+void enterMassage() {
+  systemState = SystemState::MASSAGING;
+  systemStateStartedAt = millis();
+  testStartedAt = systemStateStartedAt;
+  driveDisplacementPair(0);
+  Serial.println("Target pressure reached; massage started");
+}
+
+void updatePressureGatedControl(uint32_t now) {
+  switch (systemState) {
+    case SystemState::WAITING:
+    case SystemState::COMPLETE:
+    case SystemState::FAULT:
+      stopAllMotors();
+      break;
+
+    case SystemState::CLAMPING:
+      driveMassageMotors(0, 0);
+      if (strainBaselineReady && strainDelta >= STRAIN_OVERLOAD_DELTA) {
+        beginRelease(true);
+      } else if (strainBaselineReady && strainDelta >= STRAIN_TARGET_DELTA) {
+        enterMassage();
+      } else if (now - systemStateStartedAt >= CLAMP_TIMEOUT_MS) {
+        beginRelease(true);
+        Serial.println("Clamp timeout; target pressure was not reached");
+      } else {
+        // Keep moving the displacement mechanism toward the pressure target.
+        driveDisplacementPair(MOVE_HOLD_PWM);
+      }
+      break;
+
+    case SystemState::MASSAGING:
+      driveDisplacementPair(0);
+      if (strainBaselineReady && strainDelta >= STRAIN_OVERLOAD_DELTA) {
+        beginRelease(true);
+      } else if (now - testStartedAt >= MAX_TEST_RUN_MS) {
+        beginRelease(false);
+      } else {
+        updateMassagePair(now);
+      }
+      break;
+
+    case SystemState::RELEASING:
+      driveMassageMotors(0, 0);
+      driveDisplacementPair(-MOVE_HOLD_PWM);
+      if (now - systemStateStartedAt >= RELEASE_RUN_MS) {
+        stopAllMotors();
+        testRunning = false;
+        testFinished = true;
+        systemState = releaseToFault ? SystemState::FAULT : SystemState::COMPLETE;
+        Serial.println(releaseToFault ? "Safety stop; reset ESP32 to run again"
+                                      : "Cycle completed; reset ESP32 to run again");
+      }
+      break;
+  }
 }
 
 const char* strainLevelName() {
@@ -278,7 +358,7 @@ void setup() {
 
   stopAllMotors();
   bootAt = millis();
-  Serial.println("CloudLift v0.4.3 ready; automatic start in 3 seconds");
+  Serial.println("CloudLift v0.5.0 ready; automatic start in 3 seconds");
 }
 
 void loop() {
@@ -289,17 +369,7 @@ void loop() {
     startTest();
   }
 
-  if (testRunning) {
-    if (now - testStartedAt >= MAX_TEST_RUN_MS) {
-      stopAllMotors();
-      testRunning = false;
-      testFinished = true;
-      Serial.println("60-second test completed; reset ESP32 to run again");
-    } else {
-      updateDisplacementPair(now);
-      updateMassagePair(now);
-    }
-  }
+  if (testRunning) updatePressureGatedControl(now);
 
   delay(2);
 }
